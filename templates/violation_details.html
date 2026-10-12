@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+
+{% block title %}Violation Details #{{ violation.id }} - Traffic Violation AI{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <div style="display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.3rem;">
+            <a href="{{ url_for('history') }}" style="color: var(--cyan-accent); text-decoration: none; font-size: 0.9rem;">
+                &larr; Back to History
+            </a>
+            <span style="color: var(--text-dim);">&bull;</span>
+            <span class="badge {% if violation.violation_type == 'no_helmet' %}badge-red{% elif violation.violation_type == 'triple_riding' %}badge-amber{% else %}badge-red{% endif %}">
+                {{ violation.violation_type|upper|replace('_', ' ') }}
+            </span>
+            <span class="badge {% if violation.review_status == 'confirmed' %}badge-green{% elif violation.review_status == 'disputed' %}badge-red{% else %}badge-blue{% endif %}">
+                Status: {{ violation.review_status|capitalize }}
+            </span>
+        </div>
+        <h1 class="page-title">Violation Evidence Audit #{{ violation.id }}</h1>
+        <p class="page-subtitle">Job ID: <code>#{{ violation.job_id }}</code> &bull; Source: {{ violation.original_filename }} &bull; Recorded on {{ violation.created_at }}</p>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1.3fr 1fr; gap: 2rem;">
+    
+    <!-- Left: Evidence Image & Inspection -->
+    <div>
+        <div class="panel">
+            <div class="panel-header">
+                <h2 class="panel-title">Captured Evidence Frame</h2>
+                <span style="font-size: 0.8rem; color: var(--text-muted);">High-Resolution Crop</span>
+            </div>
+
+            <div style="border-radius: var(--radius-sm); overflow: hidden; background: #000; border: 1px solid var(--border-color); text-align: center;">
+                {% if violation.evidence_path %}
+                    <img src="{{ violation.evidence_path }}" style="max-width: 100%; max-height: 480px; object-fit: contain;" alt="Violation Evidence">
+                {% else %}
+                    <div style="padding: 4rem 1rem; color: var(--text-dim);">Evidence crop not available for this record.</div>
+                {% endif %}
+            </div>
+
+            <!-- Legal & Verification Disclaimer -->
+            <div style="margin-top: 1.2rem; padding: 0.9rem 1.1rem; background: rgba(245,158,11,0.08); border-left: 3px solid var(--amber); border-radius: 4px; font-size: 0.82rem; color: #fde68a;">
+                <strong>Notice:</strong> This result is generated automatically by computer vision algorithms. It serves as investigatory evidence and must be reviewed and confirmed by an authorized traffic enforcement officer.
+            </div>
+        </div>
+    </div>
+
+    <!-- Right: Forensic Details & Reviewer Actions -->
+    <div>
+        <!-- Detection Metrics Panel -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2 class="panel-title">Detection Forensics</h2>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.2rem;">
+                <div style="background: var(--bg-secondary); padding: 0.8rem; border-radius: 6px;">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Confidence Score</div>
+                    <div style="font-size: 1.4rem; font-weight: 700; color: #fff;">
+                        {% if violation.confidence and violation.confidence > 0 %}
+                            {{ (violation.confidence * 100)|round(1) }}%
+                        {% else %}
+                            <span style="color: var(--amber); font-size: 1.1rem;">Uncertain</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div style="background: var(--bg-secondary); padding: 0.8rem; border-radius: 6px;">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Track Identifier</div>
+                    <div style="font-size: 1.4rem; font-weight: 700; color: var(--cyan-accent);">
+                        {{ violation.track_id or 'N/A' }}
+                    </div>
+                </div>
+
+                <div style="background: var(--bg-secondary); padding: 0.8rem; border-radius: 6px;">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Frame Index</div>
+                    <div style="font-size: 1.2rem; font-weight: 600; color: #fff;">
+                        {{ violation.frame_number if violation.frame_number is not none else '0' }}
+                    </div>
+                </div>
+
+                <div style="background: var(--bg-secondary); padding: 0.8rem; border-radius: 6px;">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Timestamp</div>
+                    <div style="font-size: 1.2rem; font-weight: 600; color: #fff;">
+                        {{ violation.timestamp_sec if violation.timestamp_sec is not none else '0.0' }}s
+                    </div>
+                </div>
+            </div>
+
+            {% if violation.rider_count %}
+            <div style="margin-bottom: 0.8rem; font-size: 0.9rem;">
+                <strong>Rider Count Detected:</strong> <span style="color: var(--amber); font-weight: 700;">{{ violation.rider_count }} riders</span>
+            </div>
+            {% endif %}
+
+            {% if violation.reviewer_notes %}
+            <div style="margin-bottom: 0.8rem; font-size: 0.85rem; color: #bae6fd; background: rgba(56, 189, 248, 0.08); padding: 0.6rem 0.8rem; border-radius: 4px; border-left: 3px solid var(--cyan-accent);">
+                <strong>Analysis Context / Notes:</strong> {{ violation.reviewer_notes }}
+            </div>
+            {% endif %}
+
+            {% if violation.bbox %}
+            <div style="margin-bottom: 0.8rem; font-size: 0.85rem; color: var(--text-muted);">
+                <strong>Bounding Box [x1, y1, x2, y2]:</strong> <code>{{ violation.bbox }}</code>
+            </div>
+            {% endif %}
+
+            <!-- Number Plate OCR Section -->
+            <div style="margin-top: 1.2rem; padding-top: 1.2rem; border-top: 1px solid var(--border-color);">
+                <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.4rem; color: var(--text-main);">
+                    License Plate OCR Extraction
+                </div>
+                {% if violation.plate_text %}
+                <div style="display: flex; align-items: center; gap: 0.8rem; background: var(--bg-secondary); padding: 0.75rem 1rem; border-radius: 6px;">
+                    <div style="font-family: monospace; font-size: 1.2rem; font-weight: 700; color: #fff; letter-spacing: 0.05em;">
+                        {{ violation.plate_text }}
+                    </div>
+                    {% if violation.plate_confidence %}
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">
+                        (OCR Conf: {{ (violation.plate_confidence * 100)|round(1) }}%)
+                    </span>
+                    {% endif %}
+                </div>
+                {% else %}
+                <div style="color: var(--text-dim); font-size: 0.85rem; font-style: italic;">
+                    Plate unreadable or obscured in this frame. Manual review suggested.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Reviewer Audit Workflow Form -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2 class="panel-title">Officer Review & Action</h2>
+            </div>
+
+            <form method="POST" action="{{ url_for('violation_details', violation_id=violation.id) }}">
+                <div class="form-group">
+                    <label class="form-label" for="review_status">Update Status Decision</label>
+                    <select name="review_status" id="review_status" class="form-select">
+                        <option value="confirmed" {% if violation.review_status == 'confirmed' %}selected{% endif %}>
+                            ✓ Confirm Violation (Valid AI Detection)
+                        </option>
+                        <option value="pending" {% if violation.review_status == 'pending' %}selected{% endif %}>
+                            ⏳ Pending Further Verification
+                        </option>
+                        <option value="insufficient_evidence" {% if violation.review_status == 'insufficient_evidence' %}selected{% endif %}>
+                            ⚠️ Insufficient Evidence (Candidate Flag)
+                        </option>
+                        <option value="disputed" {% if violation.review_status == 'disputed' %}selected{% endif %}>
+                            ✗ Disputed / Rider Contested
+                        </option>
+                        <option value="false_positive" {% if violation.review_status == 'false_positive' %}selected{% endif %}>
+                            ✗ False Positive (Dismiss Event)
+                        </option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="reviewer_notes">Officer / Reviewer Notes</label>
+                    <textarea name="reviewer_notes" id="reviewer_notes" class="form-control" rows="3" placeholder="Add optional verification notes or context...">{{ violation.reviewer_notes or '' }}</textarea>
+                </div>
+
+                <button type="submit" class="btn btn-primary" style="width: 100%;">
+                    Save Audit Decision
+                </button>
+            </form>
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}

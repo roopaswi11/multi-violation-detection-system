@@ -1,0 +1,8 @@
+path: c:/Users/roopa/Documents/multi-voilation system/Wrong Direction.v4i.yolov11
+train: train/images
+val: valid/images
+test: test/images
+nc: 2
+names:
+- Right-Direction
+- Wrong-Direction

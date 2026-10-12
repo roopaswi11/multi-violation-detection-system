@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 4
+names: ['bike', 'helmet', 'no-helmet', 'number-plate']
+
+roboflow:
+  workspace: helmet-and-number-plate-detection-project
+  project: helmet-detection-project-qmxq3
+  version: 3
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/helmet-and-number-plate-detection-project/helmet-detection-project-qmxq3/dataset/3

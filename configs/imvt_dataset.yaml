@@ -1,0 +1,16 @@
+path: c:/Users/roopa/Documents/multi-voilation system/IMVTDataset/IMVTDataset
+train: train/images
+val: val/images
+test: test/images
+nc: 10
+names:
+- b
+- driver
+- earphone
+- helmet
+- license_plate
+- mobile_phone
+- no_helmet
+- object
+- pillion
+- two_wheeler

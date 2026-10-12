@@ -1,0 +1,10 @@
+path: c:/Users/roopa/Documents/multi-voilation system/traffic dataset.v4i.yolov11
+train: train/images
+val: valid/images
+test: test/images
+nc: 4
+names:
+- helmet
+- no helmet
+- number plate
+- triple riding

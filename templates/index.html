@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Traffic Violation AI{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Traffic Monitoring Command Center</h1>
+        <p class="page-subtitle">Real-time statistics, violation surveillance metrics, and recent detection jobs.</p>
+    </div>
+    <div>
+        <a href="{{ url_for('upload') }}" class="btn btn-primary">
+            <span>+</span> Upload Image or Video
+        </a>
+    </div>
+</div>
+
+<!-- Metrics Cards Grid -->
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-label">
+            <span>Files Processed</span>
+            <span class="metric-badge">All Time</span>
+        </div>
+        <div class="metric-value">{{ stats.total_jobs }}</div>
+        <div style="font-size: 0.82rem; color: var(--text-dim);">Images & videos analyzed</div>
+    </div>
+
+    <div class="metric-card alert-card">
+        <div class="metric-label">
+            <span style="color: #f87171;">Total Violations</span>
+            <span class="badge badge-red">Alerts</span>
+        </div>
+        <div class="metric-value" style="color: #f87171;">{{ stats.total_violations }}</div>
+        <div style="font-size: 0.82rem; color: var(--text-dim);">Confirmed & pending events</div>
+    </div>
+
+    <div class="metric-card alert-card">
+        <div class="metric-label">
+            <span>No-Helmet Violations</span>
+            <span class="badge badge-red">Safety</span>
+        </div>
+        <div class="metric-value">{{ stats.no_helmet_count }}</div>
+        <div style="font-size: 0.82rem; color: var(--text-dim);">Riders without helmets</div>
+    </div>
+
+    <div class="metric-card warning-card">
+        <div class="metric-label">
+            <span>Triple Riding</span>
+            <span class="badge badge-amber">Overload</span>
+        </div>
+        <div class="metric-value">{{ stats.triple_riding_count }}</div>
+        <div style="font-size: 0.82rem; color: var(--text-dim);">&gt;2 riders per motorcycle</div>
+    </div>
+
+    <div class="metric-card alert-card">
+        <div class="metric-label">
+            <span>Wrong-Side Riding</span>
+            <span class="badge badge-red">Trajectory</span>
+        </div>
+        <div class="metric-value">{{ stats.wrong_side_count }}</div>
+        <div style="font-size: 0.82rem; color: var(--text-dim);">Contraflow motion tracked</div>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="charts-grid">
+    <div class="panel">
+        <div class="panel-header">
+            <h2 class="panel-title">
+                <span style="color: var(--cyan-accent);">◉</span> Violation Distribution
+            </h2>
+        </div>
+        <div class="chart-wrapper">
+            <canvas id="violationPieChart"></canvas>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">
+            <h2 class="panel-title">
+                <span style="color: var(--emerald);">◉</span> Review & Audit Workflow
+            </h2>
+        </div>
+        <div class="chart-wrapper">
+            <canvas id="reviewStatusChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Detection Jobs Table -->
+<div class="panel">
+    <div class="panel-header">
+        <h2 class="panel-title">Recent Detection Activities</h2>
+        <a href="{{ url_for('history') }}" class="btn btn-secondary" style="padding: 0.4rem 0.9rem; font-size: 0.85rem;">
+            View All Violations &rarr;
+        </a>
+    </div>
+
+    {% if stats.recent_jobs and stats.recent_jobs|length > 0 %}
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Job ID</th>
+                    <th>Type</th>
+                    <th>Filename</th>
+                    <th>Date & Time</th>
+                    <th>Status</th>
+                    <th>Violations</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in stats.recent_jobs %}
+                <tr>
+                    <td><code>#{{ job.id }}</code></td>
+                    <td>
+                        <span class="badge {% if job.file_type == 'video' %}badge-purple{% else %}badge-blue{% endif %}">
+                            {{ job.file_type|upper }}
+                        </span>
+                    </td>
+                    <td style="font-weight: 500;">{{ job.original_filename }}</td>
+                    <td style="color: var(--text-muted);">{{ job.created_at }}</td>
+                    <td>
+                        <span class="badge {% if job.status == 'completed' %}badge-green{% elif 'failed' in job.status %}badge-red{% else %}badge-amber{% endif %}">
+                            {{ job.status|capitalize }}
+                        </span>
+                    </td>
+                    <td>
+                        <strong style="color: {% if job.total_violations > 0 %}#f87171{% else %}#34d399{% endif %};">
+                            {{ job.total_violations }}
+                        </strong>
+                    </td>
+                    <td>
+                        <a href="{{ url_for('results', job_id=job.id) }}" class="btn btn-secondary" style="padding: 0.35rem 0.8rem; font-size: 0.82rem;">
+                            View Results
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div style="text-align: center; padding: 3rem 1rem; color: var(--text-dim);">
+        <p style="font-size: 1.1rem; margin-bottom: 0.8rem;">No detection jobs recorded yet.</p>
+        <a href="{{ url_for('upload') }}" class="btn btn-primary">Start Your First Detection</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

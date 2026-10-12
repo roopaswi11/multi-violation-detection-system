@@ -1,0 +1,236 @@
+import os
+import cv2
+import uuid
+from config import Config
+
+class ViolationAggregator:
+    def __init__(self, evidence_dir=None):
+        self.evidence_dir = evidence_dir or Config.OUTPUTS_EVIDENCE_DIR
+        os.makedirs(self.evidence_dir, exist_ok=True)
+        # Deduplication cache for video: key -> { 'highest_conf': float, 'violation': dict }
+        # key: (violation_type, track_id)
+        self.active_tracked_violations = {}
+
+    def save_evidence_crop(self, frame, bbox, violation_type, track_id=None, frame_idx=0):
+        """
+        Extracts a clean crop around the violation with 15% context margin,
+        draws a focused indicator, and saves to the evidence directory.
+        Returns the relative path for web serving.
+        """
+        if frame is None or bbox is None:
+            return None
+            
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = [int(v) for v in bbox]
+        
+        # Add 15% context margin
+        bw = x2 - x1
+        bh = y2 - y1
+        mx = int(bw * 0.15)
+        my = int(bh * 0.15)
+        
+        cx1 = max(0, x1 - mx)
+        cy1 = max(0, y1 - my)
+        cx2 = min(w, x2 + mx)
+        cy2 = min(h, y2 + my)
+        
+        crop = frame[cy1:cy2, cx1:cx2].copy()
+        if crop.size == 0:
+            return None
+            
+        # Draw bounding box inside the cropped evidence
+        box_in_crop_x1 = x1 - cx1
+        box_in_crop_y1 = y1 - cy1
+        box_in_crop_x2 = x2 - cx1
+        box_in_crop_y2 = y2 - cy1
+        
+        color = (0, 0, 255) if violation_type == 'no_helmet' else (
+            (0, 165, 255) if violation_type == 'triple_riding' else (0, 0, 200)
+        )
+        cv2.rectangle(crop, (box_in_crop_x1, box_in_crop_y1), (box_in_crop_x2, box_in_crop_y2), color, 2)
+        
+        # Label badge
+        badge_text = f"{violation_type.upper().replace('_', ' ')}"
+        cv2.putText(crop, badge_text, (box_in_crop_x1 + 4, max(18, box_in_crop_y1 - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
+
+        # Unique evidence filename
+        uid = str(uuid.uuid4())[:8]
+        filename = f"ev_{violation_type}_f{frame_idx}_t{track_id or 'none'}_{uid}.jpg"
+        abs_path = os.path.join(self.evidence_dir, filename)
+        cv2.imwrite(abs_path, crop)
+        
+        # Return web-accessible path
+        return f"/outputs/evidence/{filename}"
+
+    @staticmethod
+    def _compute_iou(box1, box2):
+        if not box1 or not box2 or len(box1) < 4 or len(box2) < 4:
+            return 0.0
+        x1 = max(box1[0], box2[0])
+        y1 = max(box1[1], box2[1])
+        x2 = min(box1[2], box2[2])
+        y2 = min(box1[3], box2[3])
+        inter_area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+        if inter_area <= 0.0:
+            return 0.0
+        b1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
+        b2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
+        union_area = b1_area + b2_area - inter_area
+        return inter_area / union_area if union_area > 0 else 0.0
+
+    def aggregate_frame(self, frame, helmet_violations, triple_violations, wrong_side_violations,
+                        plate_ocr_results, frame_idx=0, timestamp_sec=0.0, is_video=False):
+        """
+        Combines and deduplicates violations from all detectors for a given frame.
+        Associates number-plate information with motorcycle bounding boxes.
+        Normalizes schemas and preserves distinct vehicle violations.
+        """
+        frame_violations = []
+        raw_list = []
+        
+        if helmet_violations:
+            raw_list.extend(helmet_violations)
+        if triple_violations:
+            raw_list.extend(triple_violations)
+        if wrong_side_violations:
+            raw_list.extend(wrong_side_violations)
+
+        for v in raw_list:
+            v_type = v['violation_type']
+            track_id = v.get('track_id')
+            bbox = v.get('bounding_box')
+            conf = v.get('confidence')
+            is_candidate = v.get('is_candidate', False) or (v.get('review_status') == 'insufficient_evidence')
+            detected = v.get('detected', not is_candidate)
+
+            # Associate plate OCR info if bike matches
+            plate_info = {'text': None, 'confidence': None, 'status': 'none_detected'}
+            if plate_ocr_results:
+                for p_res in plate_ocr_results:
+                    if p_res.get('status') == 'readable':
+                        plate_info = {
+                            'text': p_res.get('normalized_text'),
+                            'confidence': p_res.get('confidence'),
+                            'status': p_res.get('status')
+                        }
+                        break
+                    elif plate_info['status'] == 'none_detected':
+                        plate_info = {
+                            'text': p_res.get('normalized_text'),
+                            'confidence': p_res.get('confidence'),
+                            'status': p_res.get('status')
+                        }
+
+            # Standardized title & review status
+            if is_candidate:
+                title = v.get('title') or "WRONG-SIDE RIDING — NEEDS REVIEW"
+                rev_status = "insufficient_evidence"
+                status_code = v.get('status') or "potential_wrong_side"
+            else:
+                title = v.get('title') or f"{v_type.upper().replace('_', ' ')}"
+                rev_status = v.get('review_status', 'pending' if (conf is not None and conf < 0.70) else 'confirmed')
+                status_code = v.get('status', 'pending_review')
+
+            # Build unified structured event conforming to standard specification
+            assessment_type = v.get('assessment_type', 'video' if is_video else 'image')
+            event = {
+                "violation_type": v_type,
+                "title": title,
+                "detected": detected,
+                "is_candidate": is_candidate,
+                "assessment_type": assessment_type,
+                "confidence": round(float(conf), 4) if conf is not None else None,
+                "detector_confidence": round(float(v['detector_confidence']), 4) if v.get('detector_confidence') is not None else None,
+                "bounding_box": [round(float(c), 2) for c in bbox] if bbox else [],
+                "rider_count": v.get('rider_count'),
+                "track_id": track_id,
+                "frame_number": frame_idx if is_video else None,
+                "evidence_frame": frame_idx if is_video else None,
+                "timestamp_sec": round(float(timestamp_sec), 2) if is_video else 0.0,
+                "plate_text": plate_info['text'],
+                "plate_confidence": plate_info['confidence'],
+                "plate_status": plate_info['status'],
+                "review_status": rev_status,
+                "status": status_code,
+                "reason": v.get('reason', ''),
+                "estimated_orientation": v.get('estimated_orientation'),
+                "estimated_movement": v.get('estimated_movement'),
+                "permitted_direction": v.get('permitted_direction'),
+                "permitted_direction_label": v.get('permitted_direction_label'),
+                "evidence_path": None,
+                "evidence_image": None
+            }
+
+            if is_video and track_id is not None:
+                # Deduplication logic for video:
+                # Track the violation across frames for this specific track_id
+                dedup_key = (v_type, track_id)
+                if dedup_key not in self.active_tracked_violations:
+                    # First time seeing violation for this track
+                    evidence_path = self.save_evidence_crop(frame, bbox, v_type, track_id, frame_idx)
+                    event['evidence_path'] = evidence_path
+                    event['evidence_image'] = evidence_path
+                    self.active_tracked_violations[dedup_key] = {
+                        'highest_conf': conf,
+                        'event': event
+                    }
+                    frame_violations.append(event)
+                else:
+                    existing = self.active_tracked_violations[dedup_key]
+                    existing_event = existing['event']
+                    
+                    # Upgrade from candidate to confirmed if new detection is confirmed
+                    if existing_event.get('is_candidate') and not is_candidate:
+                        new_evidence = self.save_evidence_crop(frame, bbox, v_type, track_id, frame_idx)
+                        existing['highest_conf'] = conf
+                        existing_event['detected'] = True
+                        existing_event['is_candidate'] = False
+                        existing_event['title'] = title
+                        existing_event['confidence'] = round(float(conf), 4) if conf is not None else None
+                        existing_event['review_status'] = rev_status
+                        existing_event['status'] = status_code
+                        existing_event['reason'] = v.get('reason', '')
+                        existing_event['frame_number'] = frame_idx
+                        existing_event['evidence_frame'] = frame_idx
+                        existing_event['timestamp_sec'] = round(float(timestamp_sec), 2)
+                        existing_event['bounding_box'] = [round(float(c), 2) for c in bbox]
+                        existing_event['evidence_path'] = new_evidence
+                        existing_event['evidence_image'] = new_evidence
+                    # Retain higher confidence frame evidence for already confirmed violations
+                    elif conf is not None and (existing['highest_conf'] is None or conf > existing['highest_conf']):
+                        new_evidence = self.save_evidence_crop(frame, bbox, v_type, track_id, frame_idx)
+                        existing['highest_conf'] = conf
+                        existing_event['confidence'] = round(float(conf), 4)
+                        existing_event['frame_number'] = frame_idx
+                        existing_event['evidence_frame'] = frame_idx
+                        existing_event['timestamp_sec'] = round(float(timestamp_sec), 2)
+                        existing_event['bounding_box'] = [round(float(c), 2) for c in bbox]
+                        existing_event['evidence_path'] = new_evidence
+                        existing_event['evidence_image'] = new_evidence
+            else:
+                # Spatial deduplication for untracked violations (or static images)
+                is_duplicate = False
+                for existing_event in frame_violations:
+                    if existing_event['violation_type'] == v_type:
+                        iou = self._compute_iou(existing_event.get('bounding_box'), bbox)
+                        if iou > 0.50:
+                            is_duplicate = True
+                            if conf is not None and (existing_event.get('confidence') is None or conf > existing_event['confidence']):
+                                existing_event['confidence'] = round(float(conf), 4)
+                                existing_event['bounding_box'] = [round(float(c), 2) for c in bbox]
+                            break
+                            
+                if not is_duplicate:
+                    evidence_path = self.save_evidence_crop(frame, bbox, v_type, track_id, frame_idx)
+                    event['evidence_path'] = evidence_path
+                    event['evidence_image'] = evidence_path
+                    frame_violations.append(event)
+
+        return frame_violations
+
+    def get_final_video_violations(self):
+        """
+        Returns the deduplicated list of unique violations recorded during video processing.
+        """
+        return [item['event'] for item in self.active_tracked_violations.values()]

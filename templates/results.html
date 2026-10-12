@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+
+{% block title %}Results #{{ job.id }} - Traffic Violation AI{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <div style="display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.3rem;">
+            <h1 class="page-title">Detection Results</h1>
+            <span class="badge {% if job.file_type == 'video' %}badge-purple{% else %}badge-blue{% endif %}">
+                {{ job.file_type|upper }}
+            </span>
+            {% set confirmed_violations = violations | selectattr("review_status", "ne", "insufficient_evidence") | list %}
+            {% set candidate_violations = violations | selectattr("review_status", "equalto", "insufficient_evidence") | list %}
+            {% set conf_count = confirmed_violations|length %}
+            {% set cand_count = candidate_violations|length %}
+            {% if conf_count > 0 and cand_count > 0 %}
+            <span class="badge badge-red">{{ conf_count }} Confirmed Violation{% if conf_count != 1 %}s{% endif %}</span>
+            <span class="badge badge-amber">{{ cand_count }} Needs Review</span>
+            {% elif conf_count > 0 %}
+            <span class="badge badge-red">{{ conf_count }} Violation{% if conf_count != 1 %}s{% endif %} Found</span>
+            {% elif cand_count > 0 %}
+            <span class="badge badge-amber">{{ cand_count }} Needs Review</span>
+            {% else %}
+            <span class="badge badge-green">0 Violations Found</span>
+            {% endif %}
+        </div>
+        <p class="page-subtitle">Source: <strong>{{ job.original_filename }}</strong> &bull; Job ID: <code>#{{ job.id }}</code> &bull; Processed at {{ job.completed_at or job.created_at }}</p>
+    </div>
+    <div style="display: flex; gap: 0.8rem;">
+        {% if job.output_path %}
+        <a href="{{ url_for('download', job_id=job.id) }}" class="btn btn-primary">
+            ⭳ Download Annotated {{ job.file_type|capitalize }}
+        </a>
+        {% endif %}
+        <a href="{{ url_for('upload') }}" class="btn btn-secondary">
+            + New Detection
+        </a>
+    </div>
+</div>
+
+<div class="results-grid">
+    
+    <!-- Left: Annotated Media Viewer -->
+    <div>
+        <div class="panel">
+            <div class="panel-header">
+                <h2 class="panel-title">Annotated Surveillance Output</h2>
+                <span style="font-size: 0.82rem; color: var(--text-muted);">
+                    YOLO11 Boxes • Trajectories • License Plates
+                </span>
+            </div>
+
+            <div class="media-viewer">
+                {% if job.file_type == 'video' %}
+                    <video controls autoplay loop muted style="width: 100%; height: auto;">
+                        <source src="{{ job.output_path }}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                {% else %}
+                    <img src="{{ job.output_path }}" alt="Annotated Detection Result">
+                {% endif %}
+            </div>
+
+            <div style="margin-top: 1.2rem; display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; color: var(--text-dim); flex-wrap: wrap; gap: 0.5rem;">
+                <div>
+                    Models: 
+                    <span style="color: #93c5fd;">{{ (job.metadata and job.metadata.primary_model) or 'best.pt' }}</span>
+                    {% if job.metadata and job.metadata.base_model %}
+                    + <span style="color: #a78bfa;">{{ job.metadata.base_model }}</span>
+                    {% endif %}
+                    {% if job.metadata and job.metadata.conf_threshold is defined %}
+                    &bull; Threshold: {{ (job.metadata.conf_threshold * 100)|round }}%
+                    {% endif %}
+                    {% if job.metadata and job.metadata.total_detections is defined %}
+                    &bull; Detections: <strong>{{ job.metadata.total_detections }}</strong>
+                    {% endif %}
+                </div>
+                <div>Status: <span style="color: {% if job.total_violations > 0 %}#f87171{% elif job.metadata and job.metadata.total_detections == 0 %}#fbbf24{% else %}#34d399{% endif %}; font-weight: 600;">{{ job.status|upper }}</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right: Structured Violations & Evidence Gallery -->
+    <div>
+        <div class="panel">
+            <div class="panel-header">
+                <h2 class="panel-title">Detected Violations ({{ violations|length }})</h2>
+                <a href="{{ url_for('history') }}" style="font-size: 0.82rem; color: var(--cyan-accent); text-decoration: none;">
+                    History Log &rarr;
+                </a>
+            </div>
+
+            {% if violations and violations|length > 0 %}
+            <div style="max-height: 600px; overflow-y: auto; padding-right: 0.5rem;">
+                {% for v in violations %}
+                <div class="violation-card-item {% if v.violation_type == 'triple_riding' %}triple{% elif v.violation_type == 'wrong_side' %}wrong-side{% endif %} {% if v.review_status == 'insufficient_evidence' %}needs-review{% endif %}">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.6rem;">
+                        <div>
+                            {% if v.review_status == 'insufficient_evidence' %}
+                            <span class="badge badge-amber">
+                                WRONG-SIDE RIDING — NEEDS REVIEW
+                            </span>
+                            {% elif v.violation_type == 'wrong_side' %}
+                            <span class="badge badge-red">
+                                WRONG-SIDE RIDING
+                            </span>
+                            {% elif v.violation_type == 'triple_riding' %}
+                            <span class="badge badge-amber">
+                                TRIPLE RIDING
+                            </span>
+                            {% else %}
+                            <span class="badge badge-red">
+                                NO HELMET
+                            </span>
+                            {% endif %}
+                            {% if v.track_id %}
+                            <span class="badge badge-blue" style="margin-left: 0.3rem;">Track ID: {{ v.track_id }}</span>
+                            {% endif %}
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 0.78rem; color: var(--text-muted);">Confidence</div>
+                            <div style="font-weight: 700; color: #fff; font-size: 1rem;">
+                                {% if v.confidence is not none and v.confidence > 0 %}
+                                {{ (v.confidence * 100)|round(1) }}%
+                                {% elif v.detector_confidence is defined and v.detector_confidence is not none %}
+                                <span style="font-size: 0.85rem; color: var(--amber);" title="Object Detector Confidence">Det: {{ (v.detector_confidence * 100)|round(1) }}%</span>
+                                {% else %}
+                                <span style="font-size: 0.85rem; color: var(--amber);">Uncertain</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr auto; gap: 0.8rem; align-items: center;">
+                        <div>
+                            {% if v.rider_count %}
+                            <div style="font-size: 0.85rem; color: var(--text-main); margin-bottom: 0.2rem;">
+                                👥 <strong>Riders Detected:</strong> {{ v.rider_count }} riders on vehicle
+                            </div>
+                            {% endif %}
+
+                            {% if v.permitted_direction_label or v.permitted_direction %}
+                            <div style="font-size: 0.85rem; color: var(--text-main); margin-bottom: 0.2rem;">
+                                🛣️ <strong>Permitted Direction:</strong> {{ v.permitted_direction_label or v.permitted_direction }}
+                            </div>
+                            {% endif %}
+
+                            {% if v.estimated_orientation %}
+                            <div style="font-size: 0.85rem; color: var(--text-main); margin-bottom: 0.2rem;">
+                                🧭 <strong>Orientation:</strong> {{ v.estimated_orientation }}
+                            </div>
+                            {% elif v.estimated_movement %}
+                            <div style="font-size: 0.85rem; color: var(--text-main); margin-bottom: 0.2rem;">
+                                🧭 <strong>Movement:</strong> {{ v.estimated_movement }}
+                            </div>
+                            {% endif %}
+
+                            {% if v.plate_text %}
+                            <div style="font-size: 0.85rem; color: var(--text-main); margin-bottom: 0.2rem;">
+                                🪪 <strong>License Plate:</strong> 
+                                <span style="background: rgba(255,255,255,0.08); padding: 0.15rem 0.4rem; border-radius: 4px; font-family: monospace; font-weight: 700; color: #e2e8f0;">
+                                    {{ v.plate_text }}
+                                </span>
+                                {% if v.plate_confidence %}
+                                <span style="font-size: 0.75rem; color: var(--text-dim);">({{ (v.plate_confidence * 100)|round(1) }}%)</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+
+                            {% if v.frame_number is not none %}
+                            <div style="font-size: 0.78rem; color: var(--text-dim);">
+                                Frame: {{ v.frame_number }} &bull; Timestamp: {{ v.timestamp_sec }}s
+                            </div>
+                            {% endif %}
+
+                            {% if v.reviewer_notes %}
+                            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.4rem; font-style: italic;">
+                                Note: {{ v.reviewer_notes }}
+                            </div>
+                            {% elif v.reason %}
+                            <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.4rem; font-style: italic;">
+                                Note: {{ v.reason }}
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Evidence Crop Thumbnail -->
+                        {% if v.evidence_path %}
+                        <div>
+                            <a href="{{ url_for('violation_details', violation_id=v.id) }}" title="Inspect Evidence & Audit">
+                                <img src="{{ v.evidence_path }}" class="evidence-thumb-img" alt="Evidence Crop">
+                            </a>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <div style="margin-top: 0.8rem; padding-top: 0.6rem; border-top: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center;">
+                        {% if v.review_status == 'insufficient_evidence' %}
+                        <span class="badge badge-amber">
+                            INSUFFICIENT EVIDENCE
+                        </span>
+                        {% elif v.review_status == 'confirmed' %}
+                        <span class="badge badge-green">
+                            Confirmed
+                        </span>
+                        {% elif v.review_status == 'disputed' %}
+                        <span class="badge badge-red">
+                            Disputed
+                        </span>
+                        {% else %}
+                        <span class="badge badge-blue">
+                            Pending Review
+                        </span>
+                        {% endif %}
+                        <a href="{{ url_for('violation_details', violation_id=v.id) }}" class="btn btn-secondary" style="padding: 0.25rem 0.7rem; font-size: 0.78rem;">
+                            Review & Details &rarr;
+                        </a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            {% if job.metadata and job.metadata.total_detections is defined and job.metadata.total_detections == 0 %}
+            <div style="text-align: center; padding: 2.5rem 1.2rem; background: rgba(245, 158, 11, 0.05); border: 1px dashed rgba(245, 158, 11, 0.3); border-radius: 8px;">
+                <div style="font-size: 2.2rem; color: #fbbf24; margin-bottom: 0.5rem;">⚠️</div>
+                <div style="font-size: 1.1rem; color: #fff; font-weight: 600;">No Traffic Objects Detected</div>
+                <p style="font-size: 0.85rem; color: var(--text-dim); margin-top: 0.5rem; line-height: 1.4;">
+                    {{ job.metadata.diagnostic_message or 'The detector did not locate any motorcycles, riders, or helmets at the current confidence threshold.' }}
+                </p>
+                <div style="margin-top: 1rem;">
+                    <a href="{{ url_for('upload') }}" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.8rem;">
+                        Try with lower confidence threshold
+                    </a>
+                </div>
+            </div>
+            {% else %}
+            <div style="text-align: center; padding: 3rem 1rem; color: var(--text-dim);">
+                <div style="font-size: 2.2rem; color: #34d399; margin-bottom: 0.5rem;">✓</div>
+                <div style="font-size: 1.1rem; color: #fff; font-weight: 600;">No Traffic Violations Detected</div>
+                <p style="font-size: 0.85rem; margin-top: 0.4rem;">
+                    {% if job.metadata and job.metadata.diagnostic_message %}
+                        {{ job.metadata.diagnostic_message }}
+                    {% else %}
+                        All observed riders comply with helmet, rider count, and trajectory direction rules.
+                    {% endif %}
+                </p>
+                {% if job.metadata and job.metadata.total_detections %}
+                <div style="margin-top: 0.8rem; font-size: 0.78rem; color: var(--text-muted);">
+                    Observed Objects: <strong>{{ job.metadata.total_detections }}</strong> verified compliant
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

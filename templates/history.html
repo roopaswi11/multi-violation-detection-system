@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Violation History - Traffic Violation AI{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Traffic Violation History Log</h1>
+        <p class="page-subtitle">Historical registry of all detected events, OCR plate recognitions, and audit records.</p>
+    </div>
+    <div>
+        <a href="{{ url_for('upload') }}" class="btn btn-primary">
+            + Process New File
+        </a>
+    </div>
+</div>
+
+<!-- Filters Panel -->
+<div class="panel" style="padding: 1.2rem;">
+    <form method="GET" action="{{ url_for('history') }}" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end;">
+        <div style="flex: 1; min-width: 200px;">
+            <label class="form-label" style="font-size: 0.8rem; margin-bottom: 0.3rem;">Filter by Violation Type</label>
+            <select name="type" class="form-select" onchange="this.form.submit()">
+                <option value="" {% if not current_type %}selected{% endif %}>All Violation Categories</option>
+                <option value="no_helmet" {% if current_type == 'no_helmet' %}selected{% endif %}>No Helmet Violations</option>
+                <option value="triple_riding" {% if current_type == 'triple_riding' %}selected{% endif %}>Triple Riding</option>
+                <option value="wrong_side" {% if current_type == 'wrong_side' %}selected{% endif %}>Wrong-Side Riding</option>
+            </select>
+        </div>
+
+        <div style="flex: 1; min-width: 200px;">
+            <label class="form-label" style="font-size: 0.8rem; margin-bottom: 0.3rem;">Filter by Audit Status</label>
+            <select name="status" class="form-select" onchange="this.form.submit()">
+                <option value="" {% if not current_status %}selected{% endif %}>All Review Statuses</option>
+                <option value="pending" {% if current_status == 'pending' %}selected{% endif %}>Pending Review</option>
+                <option value="confirmed" {% if current_status == 'confirmed' %}selected{% endif %}>Confirmed Violation</option>
+                <option value="disputed" {% if current_status == 'disputed' %}selected{% endif %}>Disputed / False Positive</option>
+            </select>
+        </div>
+
+        <div>
+            <a href="{{ url_for('history') }}" class="btn btn-secondary" style="padding: 0.75rem 1.2rem;">
+                Reset Filters
+            </a>
+        </div>
+    </form>
+</div>
+
+<!-- Violations Table -->
+<div class="panel">
+    <div class="panel-header">
+        <h2 class="panel-title">Violation Audit Log ({{ violations|length }} records)</h2>
+    </div>
+
+    {% if violations and violations|length > 0 %}
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Date & Time</th>
+                    <th>Source Media</th>
+                    <th>Violation Category</th>
+                    <th>Confidence</th>
+                    <th>Rider Count</th>
+                    <th>License Plate</th>
+                    <th>Status</th>
+                    <th>Evidence</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for v in violations %}
+                <tr>
+                    <td><code>#{{ v.id }}</code></td>
+                    <td style="color: var(--text-muted); font-size: 0.85rem;">{{ v.created_at }}</td>
+                    <td style="font-weight: 500;">{{ v.original_filename }}</td>
+                    <td>
+                        <span class="badge {% if v.violation_type == 'no_helmet' %}badge-red{% elif v.violation_type == 'triple_riding' %}badge-amber{% else %}badge-red{% endif %}">
+                            {{ v.violation_type|upper|replace('_', ' ') }}
+                        </span>
+                    </td>
+                    <td><strong>{{ (v.confidence * 100)|round(1) }}%</strong></td>
+                    <td>{{ v.rider_count or '-' }}</td>
+                    <td>
+                        {% if v.plate_text %}
+                        <span style="font-family: monospace; font-weight: 700; color: #e2e8f0; background: rgba(255,255,255,0.08); padding: 0.2rem 0.4rem; border-radius: 4px;">
+                            {{ v.plate_text }}
+                        </span>
+                        {% else %}
+                        <span style="color: var(--text-dim);">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge {% if v.review_status == 'confirmed' %}badge-green{% elif v.review_status == 'disputed' %}badge-red{% else %}badge-blue{% endif %}">
+                            {{ v.review_status|capitalize }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if v.evidence_path %}
+                        <a href="{{ v.evidence_path }}" target="_blank">
+                            <img src="{{ v.evidence_path }}" style="width: 50px; height: 36px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border-color);" alt="Crop">
+                        </a>
+                        {% else %}
+                        <span style="color: var(--text-dim);">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{{ url_for('violation_details', violation_id=v.id) }}" class="btn btn-secondary" style="padding: 0.3rem 0.7rem; font-size: 0.8rem;">
+                            Audit / Review
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div style="text-align: center; padding: 3rem 1rem; color: var(--text-dim);">
+        <p style="font-size: 1.05rem;">No violations match the selected filters.</p>
+        <a href="{{ url_for('history') }}" class="btn btn-secondary" style="margin-top: 0.8rem;">Clear Filters</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

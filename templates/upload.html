@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}New Traffic Detection - Traffic Guard AI{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">New Traffic Detection</h1>
+        <p class="page-subtitle">Upload surveillance footage or photos for automated AI violation detection, tracking, and license plate recognition.</p>
+    </div>
+</div>
+
+<div class="upload-container-wrapper">
+    <div class="panel upload-main-panel">
+        <form id="uploadForm" action="{{ url_for('upload') }}" method="POST" enctype="multipart/form-data">
+            <!-- Hidden File Input -->
+            <input type="file" name="file" id="fileInput" accept=".jpg,.jpeg,.png,.webp,.mp4,.avi,.mov,.webm" style="display: none;">
+
+            <!-- Drag & Drop Upload Area -->
+            <div class="dropzone" id="uploadDropzone">
+                <div class="dropzone-icon">⇪</div>
+                <div class="dropzone-title">Drag & Drop Image or Video Here</div>
+                <p class="dropzone-desc">or click to browse surveillance footage from your device</p>
+                <div style="margin-top: 1.25rem;">
+                    <button type="button" class="btn btn-secondary" id="browseFilesBtn">
+                        📂 Browse Files
+                    </button>
+                </div>
+                <div class="dropzone-formats">
+                    Supports JPG, JPEG, PNG, WEBP &bull; MP4, AVI, MOV, WEBM (Max: 500 MB)
+                </div>
+            </div>
+
+            <!-- Selected File Preview Container (revealed when file is selected) -->
+            <div id="filePreviewContainer" class="file-preview-container" style="display: none;">
+                <div class="file-preview-header">
+                    <div class="file-info-block">
+                        <span id="previewFileIcon" class="file-type-icon">📷</span>
+                        <div>
+                            <div id="previewFileName" class="file-info-name">surveillance_frame.jpg</div>
+                            <div id="previewFileSize" class="file-info-meta">0.0 MB &bull; Ready for AI analysis</div>
+                        </div>
+                    </div>
+                    <button type="button" id="clearFileBtn" class="btn btn-clear-file">
+                        ✕ Remove File
+                    </button>
+                </div>
+
+                <!-- Media Preview Display -->
+                <div class="preview-media-box">
+                    <img id="imagePreview" src="" alt="Selected Image Preview" style="display: none;">
+                    <video id="videoPreview" controls muted style="display: none;"></video>
+                </div>
+            </div>
+
+            <!-- Road Direction Settings -->
+            <div class="road-direction-settings-panel" id="roadDirectionSettingsPanel">
+                <div class="settings-section-title">
+                    <span class="settings-section-icon">🧭</span>
+                    Road Direction Settings
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" for="permitted_direction">
+                        Permitted Road Direction
+                    </label>
+                    <p class="form-helper-text">Select the expected direction of traffic for this road.</p>
+                    <select name="permitted_direction" id="permitted_direction" class="form-select custom-direction-select">
+                        <option value="auto" selected>Automatic / Unknown</option>
+                        <option value="downward">Downward Flow (Top to Bottom)</option>
+                        <option value="upward">Upward Flow (Bottom to Top)</option>
+                        <option value="leftward">Leftward Flow (Right to Left)</option>
+                        <option value="rightward">Rightward Flow (Left to Right)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Primary Action: Prominent ANALYZE Button directly below upload area and preview -->
+            <div id="analyzeActionContainer" class="analyze-btn-container" style="display: none;">
+                <button type="button" id="analyzeBtn" class="btn-analyze">
+                    <span class="btn-analyze-icon">⚡</span>
+                    <span class="btn-analyze-text">ANALYZE</span>
+                </button>
+            </div>
+
+            <!-- Loading Indicator with Analyzing traffic... -->
+            <div id="loadingIndicator" class="loading-state-panel" style="display: none;">
+                <div class="loading-spinner-ring"></div>
+                <div class="loading-title">Analyzing traffic...</div>
+                <p class="loading-desc">
+                    Running YOLO11 detection, rider classification, trajectory tracking, and license plate recognition.
+                </p>
+                <div id="loadingSubtext" class="loading-pulse-text">
+                    Processing frame data with neural models...
+                </div>
+            </div>
+
+            <!-- Error Banner -->
+            <div id="uploadErrorBanner" class="alert-banner-error" style="display: none;">
+                <span class="alert-icon">⚠️</span>
+                <div id="uploadErrorMessage">An error occurred during traffic analysis.</div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Real Analysis Results Section (Rendered beneath the ANALYZE button) -->
+    <div id="resultsSection" style="display: none;">
+        <!-- Injected via JavaScript from real inference response -->
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // upload.html specific initialization is driven by main.js
+</script>
+{% endblock %}

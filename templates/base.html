@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Traffic Violation Detection AI{% endblock %} - Control Center</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Chart.js for real-time visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <!-- Top Navigation -->
+    <nav class="navbar">
+        <a href="{{ url_for('dashboard') }}" class="nav-brand">
+            <div class="nav-logo-icon">▲</div>
+            <div>
+                <div class="nav-brand-title">TRAFFIC GUARD AI</div>
+                <div class="nav-brand-subtitle">YOLO11 • ViT • ByteTrack System</div>
+            </div>
+        </a>
+
+        <ul class="nav-links">
+            <li><a href="{{ url_for('dashboard') }}" class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}">Dashboard</a></li>
+            <li><a href="{{ url_for('upload') }}" class="nav-link btn-upload-nav {% if request.endpoint == 'upload' %}active{% endif %}">+ New Detection</a></li>
+            <li><a href="{{ url_for('history') }}" class="nav-link {% if request.endpoint == 'history' %}active{% endif %}">Violation History</a></li>
+        </ul>
+    </nav>
+
+    <!-- Flash Messages Container -->
+    <div class="container" style="padding-top: 1rem; padding-bottom: 0;">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div style="padding: 0.9rem 1.2rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.92rem; 
+                                background: {% if category == 'danger' %}rgba(239,68,68,0.15); color:#fca5a5; border:1px solid rgba(239,68,68,0.3);
+                                            {% elif category == 'success' %}rgba(16,185,129,0.15); color:#6ee7b7; border:1px solid rgba(16,185,129,0.3);
+                                            {% else %}rgba(245,158,11,0.15); color:#fcd34d; border:1px solid rgba(245,158,11,0.3);{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+    </div>
+
+    <!-- Main Page Body -->
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div>AI-Based Traffic Violation Detection System &bull; Powered by Ultralytics YOLO11, Vision Transformer, ByteTrack & EasyOCR</div>
+        <div style="margin-top: 0.3rem; font-size: 0.78rem; color: #64748b;">
+            Detections represent automated AI evidence. Human verification is required prior to enforcement.
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
