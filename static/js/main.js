@@ -43,33 +43,6 @@ function initDashboardCharts() {
                         cutout: '72%'
                     }
                 });
-
-                const barCanvas = document.getElementById('reviewStatusChart');
-                if (barCanvas) {
-                    new Chart(barCanvas, {
-                        type: 'bar',
-                        data: {
-                            labels: ['Pending', 'Confirmed', 'Disputed/FP'],
-                            datasets: [{
-                                label: 'Records',
-                                data: [stats.pending_review || 0, stats.confirmed_review || 0, stats.disputed_review || 0],
-                                backgroundColor: ['#38bdf8', '#10b981', '#a855f7'],
-                                borderRadius: 6
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {
-                                legend: { display: false }
-                            },
-                            scales: {
-                                x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
-                                y: { ticks: { color: '#94a3b8', precision: 0 }, grid: { color: 'rgba(255,255,255,0.05)' } }
-                            }
-                        }
-                    });
-                }
             })
             .catch(err => console.error("Error loading stats for charts:", err));
     }
@@ -492,6 +465,130 @@ function setupUploadPage() {
             summaryBadgeHtml = `<span class="badge badge-green">0 Violations</span>`;
         }
 
+        const fineSummary = data.fine_summary || {};
+        const isIncomplete = fineSummary.is_incomplete || false;
+        const totalFineAmount = fineSummary.total_fine_amount;
+        const confirmedViolationsCount = fineSummary.confirmed_violations_count !== undefined 
+            ? fineSummary.confirmed_violations_count 
+            : confirmedCount;
+        const primaryPlate = fineSummary.primary_plate;
+        const breakdown = fineSummary.breakdown || [];
+
+        let totalFineDisplay = 'TOTAL FINE: ₹0';
+        let totalFineColor = '#34d399';
+        let totalFineBadge = '<span class="badge badge-green">0 Violations Confirmed</span>';
+        let totalFineSubtext = 'All detected riders and vehicles comply with traffic safety regulations. Zero statutory penalties assessed.';
+        let cardBg = 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(30, 41, 59, 0.8) 100%)';
+        let cardBorder = 'rgba(16, 185, 129, 0.3)';
+        let cardShadow = 'rgba(16, 185, 129, 0.1)';
+
+        if (isIncomplete) {
+            totalFineDisplay = 'TOTAL FINE: INCOMPLETE';
+            totalFineColor = '#fbbf24';
+            totalFineBadge = '<span class="badge badge-amber">Fine Amount Unavailable</span>';
+            totalFineSubtext = '<span style="color: #fbbf24; font-weight: 600;">⚠️ Incomplete Total:</span> One or more confirmed violations require fine rule configuration or verification. Missing fine amounts are not silently counted as zero.';
+            cardBg = 'linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(30, 41, 59, 0.8) 100%)';
+            cardBorder = 'rgba(245, 158, 11, 0.4)';
+            cardShadow = 'rgba(245, 158, 11, 0.15)';
+        } else if (confirmedViolationsCount > 0 && totalFineAmount !== null && totalFineAmount !== undefined) {
+            totalFineDisplay = `TOTAL FINE: ₹${Math.round(totalFineAmount).toLocaleString()}`;
+            totalFineColor = '#34d399';
+            totalFineBadge = `<span class="badge badge-green">${confirmedViolationsCount} Confirmed Violation${confirmedViolationsCount !== 1 ? 's' : ''}</span>`;
+            totalFineSubtext = `Calculated strictly from ${confirmedViolationsCount} distinct verified confirmed violation${confirmedViolationsCount !== 1 ? 's' : ''}.`;
+            cardBg = 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(6, 182, 212, 0.1) 50%, rgba(15, 23, 42, 0.9) 100%)';
+            cardBorder = 'rgba(16, 185, 129, 0.45)';
+            cardShadow = 'rgba(16, 185, 129, 0.25)';
+        }
+
+        let breakdownHtml = '';
+        if (breakdown.length > 0) {
+            breakdownHtml = `
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.8rem; margin-top: 1rem;">
+                    ${breakdown.map(b => {
+                        const subtotalDisplay = b.has_unavailable 
+                            ? '<span style="color: #fbbf24; font-weight: 700; font-size: 0.9rem;">Fine amount unavailable</span>'
+                            : `<span style="color: #34d399; font-weight: 800; font-size: 1.2rem;">₹${Math.round(b.subtotal).toLocaleString()}</span>`;
+                        const bBadge = b.violation_type === 'triple_riding' ? 'badge-amber' : 'badge-red';
+                        return `
+                            <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 0.8rem 1rem;">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.3rem;">
+                                    <div>
+                                        <span class="badge ${bBadge}">${(b.short_name || b.violation_type).toUpperCase()}</span>
+                                        <div style="font-size: 0.9rem; font-weight: 700; color: #fff; margin-top: 0.3rem;">${b.display_name}</div>
+                                    </div>
+                                    <span class="badge badge-blue">${b.count} Violation${b.count !== 1 ? 's' : ''}</span>
+                                </div>
+                                <div style="font-size: 0.74rem; color: var(--text-dim); margin-bottom: 0.4rem;">⚖️ ${b.legal_provision || 'Motor Vehicles Act'}</div>
+                                <div style="display: flex; justify-content: space-between; align-items: baseline; border-top: 1px solid rgba(255, 255, 255, 0.06); padding-top: 0.4rem;">
+                                    <span style="font-size: 0.75rem; color: var(--text-muted);">${b.unit_amount ? `${b.count} × ₹${Math.round(b.unit_amount).toLocaleString()}` : 'Statutory Rate'}</span>
+                                    ${subtotalDisplay}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+        } else {
+            breakdownHtml = `
+                <div style="background: rgba(16, 185, 129, 0.05); border: 1px dashed rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 0.8rem; text-align: center; color: var(--text-dim); font-size: 0.82rem; margin-top: 0.8rem;">
+                    🛡️ No confirmed violations detected in this analyzed footage. Category penalties: <strong>₹0</strong>.
+                </div>
+            `;
+        }
+
+        const totalFineBannerHtml = `
+            <div style="background: ${cardBg}; border: 1px solid ${cardBorder}; box-shadow: 0 10px 30px -10px ${cardShadow}; border-radius: var(--radius-sm); padding: 1.2rem 1.5rem; margin-bottom: 1.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1.2rem; padding-bottom: 1.2rem; border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.3rem;">
+                            <span style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: ${totalFineColor};">
+                                Official Statutory Fine Assessment &bull; Motor Vehicles (Amendment) Act 2019
+                            </span>
+                            ${totalFineBadge}
+                        </div>
+                        <div style="font-size: 2.3rem; font-family: var(--font-heading); font-weight: 900; line-height: 1.1; color: ${totalFineColor};">
+                            ${totalFineDisplay}
+                        </div>
+                        <p style="font-size: 0.84rem; color: var(--text-dim); margin-top: 0.4rem; margin-bottom: 0;">
+                            ${totalFineSubtext}
+                        </p>
+                    </div>
+
+                    <div style="display: flex; gap: 0.8rem; flex-wrap: wrap;">
+                        <div style="background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); padding: 0.6rem 1rem; border-radius: 6px; text-align: center; min-width: 110px;">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Confirmed</div>
+                            <div style="font-size: 1.5rem; font-weight: 800; color: ${confirmedViolationsCount > 0 ? '#f87171' : '#34d399'}; line-height: 1.2; margin-top: 0.1rem;">
+                                ${confirmedViolationsCount}
+                            </div>
+                        </div>
+
+                        <div style="background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); padding: 0.6rem 1rem; border-radius: 6px; text-align: center; min-width: 140px;">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Vehicle Registration</div>
+                            <div style="margin-top: 0.2rem;">
+                                ${primaryPlate && primaryPlate !== 'UNREADABLE' 
+                                    ? `<span style="background: #fff; color: #000; font-family: monospace; font-weight: 800; font-size: 0.95rem; padding: 0.15rem 0.5rem; border-radius: 3px; border: 1px solid #000; letter-spacing: 0.05em;">🇮🇳 ${primaryPlate}</span>` 
+                                    : `<span class="badge badge-amber" style="font-family: monospace; font-size: 0.78rem;">UNREADABLE</span>`}
+                            </div>
+                        </div>
+
+                        <div style="background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); padding: 0.6rem 1rem; border-radius: 6px; text-align: center; min-width: 110px;">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Fine Records</div>
+                            <div style="font-size: 1.5rem; font-weight: 800; color: #38bdf8; line-height: 1.2; margin-top: 0.1rem;">
+                                ${data.total_fines || 0}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 1rem;">
+                    <div style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;">
+                        Breakdown by Violation Type
+                    </div>
+                    ${breakdownHtml}
+                </div>
+            </div>
+        `;
+
         resultsSection.innerHTML = `
             <div class="panel" style="animation: fadeIn 0.4s ease;">
                 <!-- Header with Action Buttons -->
@@ -517,6 +614,9 @@ function setupUploadPage() {
                         </a>
                     </div>
                 </div>
+
+                <!-- Prominent Hero Total Fine Assessment -->
+                ${totalFineBannerHtml}
 
                 <!-- Grid: Annotated Media & Violations List -->
                 <div class="results-grid" style="margin-bottom: 0;">

@@ -36,14 +36,32 @@ class VideoProcessor:
 
     def process_image(self, image_path, output_path=None):
         """
-        Processes a single static image.
+        Processes a single static image safely with EXIF orientation correction.
+        Resets per-image state completely so detections from previous uploads cannot contaminate.
         Returns: (annotated_image_path, list_of_violations, detections)
         """
-        frame = cv2.imread(image_path)
-        if frame is None:
-            raise ValueError(f"Unable to read image at: {image_path}")
+        # Reset per-image aggregator instance completely
+        self.aggregator = ViolationAggregator()
+
+        # Safe image loading with EXIF orientation normalization
+        frame = None
+        try:
+            from PIL import Image, ImageOps
+            pil_img = Image.open(image_path)
+            pil_img = ImageOps.exif_transpose(pil_img)
+            if pil_img.mode != 'RGB':
+                pil_img = pil_img.convert('RGB')
+            frame = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        except Exception:
+            frame = cv2.imread(image_path)
+
+        if frame is None or frame.size == 0 or len(frame.shape) < 2:
+            raise ValueError(f"Unable to read or decode image at: {image_path}")
 
         h, w = frame.shape[:2]
+        if h < 10 or w < 10:
+            raise ValueError(f"Image dimensions too small ({w}x{h}) for analysis.")
+
         # 1. Run YOLO detection
         detections = self.detector.detect(frame)
 
@@ -128,8 +146,13 @@ class VideoProcessor:
         violating_bboxes = [v['bounding_box'] for v in violations if v.get('bounding_box')]
         base_detections = []
         for d in detections:
+            cname = d['class_name'].lower().replace('_', ' ').strip()
+            # Suppress raw uncalibrated/conflicting no-helmet boxes from base detections.
+            # Genuine validated violations are drawn cleanly and authoritatively in _draw_violation_overlays.
+            if 'helmet' in cname and 'no' in cname:
+                continue
             is_violating_bike = False
-            if 'bike' in d['class_name'].lower() or 'motorcycle' in d['class_name'].lower():
+            if 'bike' in cname or 'motorcycle' in cname:
                 for vb in violating_bboxes:
                     if self.aggregator._compute_iou(d['bbox'], vb) > 0.60:
                         is_violating_bike = True
@@ -307,7 +330,8 @@ class VideoProcessor:
             
             # Badge text and color
             if vtype == 'no_helmet':
-                text = "VIOLATION: NO HELMET"
+                rider_label = v.get('rider_id') or 'Rider'
+                text = f"NO HELMET: {rider_label}"
                 color = (0, 0, 220)  # Red
             elif vtype == 'triple_riding':
                 rc = v.get('rider_count', 3)

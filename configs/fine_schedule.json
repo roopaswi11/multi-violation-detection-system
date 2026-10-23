@@ -1,0 +1,50 @@
+{
+  "version": "2019.1",
+  "default_jurisdiction": "India (MV Act 2019)",
+  "rules": {
+    "no_helmet": {
+      "violation_type": "no_helmet",
+      "display_name": "Riding Without Protective Headgear (No Helmet)",
+      "jurisdiction": "India (MV Act 2019)",
+      "fine_amount": 1000.0,
+      "currency": "INR",
+      "legal_provision": "Section 194D, Motor Vehicles Act, 1988 (as amended by Act 32 of 2019)",
+      "effective_date": "2019-09-01",
+      "official_source": "The Motor Vehicles (Amendment) Act, 2019 (Act No. 32 of 2019), Ministry of Road Transport and Highways (MoRTH), Gazette of India",
+      "notes": "Whoever drives a motorcycle or causes or allows a motorcycle to be driven in contravention of the provisions of section 129 or the rules or regulations made thereunder shall be punishable with a fine of one thousand rupees and he shall be disqualified for holding licence for a period of three months.",
+      "active": true
+    },
+    "triple_riding": {
+      "violation_type": "triple_riding",
+      "display_name": "Carrying More Than Permitted Riders (Triple Riding)",
+      "jurisdiction": "India (MV Act 2019)",
+      "fine_amount": 1000.0,
+      "currency": "INR",
+      "legal_provision": "Section 194C, Motor Vehicles Act, 1988 (as amended by Act 32 of 2019)",
+      "effective_date": "2019-09-01",
+      "official_source": "The Motor Vehicles (Amendment) Act, 2019 (Act No. 32 of 2019), Ministry of Road Transport and Highways (MoRTH), Gazette of India",
+      "notes": "Whoever drives a motorcycle or causes or allows a motorcycle to be driven in contravention of the provisions of section 128 or the rules or regulations made thereunder shall be punishable with a fine of one thousand rupees and he shall be disqualified for holding licence for a period of three months.",
+      "active": true
+    },
+    "wrong_side": {
+      "violation_type": "wrong_side",
+      "display_name": "Driving Against Authorised Flow of Traffic (Wrong Direction)",
+      "jurisdiction": "India (MV Act 2019)",
+      "fine_amount": 5000.0,
+      "currency": "INR",
+      "legal_provision": "Section 184(f) r/w Section 119/177, Motor Vehicles Act, 1988 (as amended by Act 32 of 2019)",
+      "effective_date": "2019-09-01",
+      "official_source": "The Motor Vehicles (Amendment) Act, 2019 (Act No. 32 of 2019), Ministry of Road Transport and Highways (MoRTH), Gazette of India",
+      "notes": "Driving against the authorized flow of traffic constitutes driving dangerously under Section 184(f), punishable with a fine of up to five thousand rupees for the first offence.",
+      "active": true
+    }
+  },
+  "jurisdiction_overrides": {
+    "Karnataka": {
+      "no_helmet": {
+        "fine_amount": 500.0,
+        "notes": "Karnataka Government Compounding Notification No. TD 112 TMR 2019"
+      }
+    }
+  }
+}

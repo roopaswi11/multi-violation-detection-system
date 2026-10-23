@@ -10,18 +10,22 @@
             <span class="badge {% if job.file_type == 'video' %}badge-purple{% else %}badge-blue{% endif %}">
                 {{ job.file_type|upper }}
             </span>
-            {% set confirmed_violations = violations | selectattr("review_status", "ne", "insufficient_evidence") | list %}
+            {% set confirmed_violations = violations | selectattr("review_status", "equalto", "confirmed") | list %}
+            {% set pending_violations = violations | selectattr("review_status", "equalto", "pending") | list %}
             {% set candidate_violations = violations | selectattr("review_status", "equalto", "insufficient_evidence") | list %}
             {% set conf_count = confirmed_violations|length %}
+            {% set pend_count = pending_violations|length %}
             {% set cand_count = candidate_violations|length %}
-            {% if conf_count > 0 and cand_count > 0 %}
+            {% if conf_count > 0 %}
             <span class="badge badge-red">{{ conf_count }} Confirmed Violation{% if conf_count != 1 %}s{% endif %}</span>
+            {% endif %}
+            {% if pend_count > 0 %}
+            <span class="badge badge-blue">{{ pend_count }} Pending Review</span>
+            {% endif %}
+            {% if cand_count > 0 %}
             <span class="badge badge-amber">{{ cand_count }} Needs Review</span>
-            {% elif conf_count > 0 %}
-            <span class="badge badge-red">{{ conf_count }} Violation{% if conf_count != 1 %}s{% endif %} Found</span>
-            {% elif cand_count > 0 %}
-            <span class="badge badge-amber">{{ cand_count }} Needs Review</span>
-            {% else %}
+            {% endif %}
+            {% if conf_count == 0 and pend_count == 0 and cand_count == 0 %}
             <span class="badge badge-green">0 Violations Found</span>
             {% endif %}
         </div>
@@ -36,6 +40,140 @@
         <a href="{{ url_for('upload') }}" class="btn btn-secondary">
             + New Detection
         </a>
+    </div>
+</div>
+
+<!-- Prominent Total Fine Amount Section -->
+<div class="panel total-fine-panel {% if fine_summary.is_incomplete %}total-fine-incomplete{% elif fine_summary.confirmed_violations_count == 0 %}total-fine-zero{% else %}total-fine-assessed{% endif %}">
+
+    <!-- Hero Header Row -->
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.08);">
+        <div>
+            <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.4rem;">
+                <span class="{% if fine_summary.is_incomplete %}text-amber{% else %}text-emerald{% endif %}" style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700;">
+                    Official Statutory Fine Assessment &bull; Motor Vehicles (Amendment) Act 2019
+                </span>
+                {% if fine_summary.is_incomplete %}
+                <span class="badge badge-amber">Fine Amount Unavailable</span>
+                {% elif fine_summary.confirmed_violations_count == 0 %}
+                <span class="badge badge-green">0 Violations Confirmed</span>
+                {% else %}
+                <span class="badge badge-green">{{ fine_summary.confirmed_violations_count }} Confirmed Violation{% if fine_summary.confirmed_violations_count != 1 %}s{% endif %}</span>
+                {% endif %}
+            </div>
+
+            <!-- Big Prominent Total Fine Title -->
+            <div class="{% if fine_summary.is_incomplete %}text-amber{% else %}text-emerald{% endif %}" style="font-size: 2.6rem; font-family: var(--font-heading); font-weight: 900; line-height: 1.1; display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;">
+                {% if fine_summary.is_incomplete %}
+                <span>TOTAL FINE: INCOMPLETE</span>
+                {% elif fine_summary.confirmed_violations_count == 0 %}
+                <span>TOTAL FINE: ₹0</span>
+                {% else %}
+                <span>TOTAL FINE: ₹{{ '{:,.0f}'.format(fine_summary.total_fine_amount) }}</span>
+                {% endif %}
+            </div>
+
+            <p style="font-size: 0.88rem; color: var(--text-dim); margin-top: 0.5rem; margin-bottom: 0;">
+                {% if fine_summary.is_incomplete %}
+                <span style="color: #fbbf24; font-weight: 600;">⚠️ Incomplete Total:</span> One or more confirmed violations require fine rule configuration or verification. Missing fine amounts are not silently counted as zero.
+                {% elif fine_summary.confirmed_violations_count == 0 %}
+                All detected riders and vehicles comply with traffic safety regulations. Zero statutory penalties assessed.
+                {% else %}
+                Calculated strictly from {{ fine_summary.confirmed_violations_count }} distinct verified confirmed violation{% if fine_summary.confirmed_violations_count != 1 %}s{% endif %}.
+                {% endif %}
+            </p>
+        </div>
+
+        <!-- Metric Badges Group -->
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+            <!-- Confirmed Violations Count -->
+            <div style="background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); padding: 0.8rem 1.2rem; border-radius: 8px; min-width: 130px; text-align: center;">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Confirmed Violations</div>
+                <div class="{% if fine_summary.confirmed_violations_count > 0 %}text-rose{% else %}text-emerald{% endif %}" style="font-size: 1.8rem; font-weight: 800; line-height: 1.2; margin-top: 0.2rem;">
+                    {{ fine_summary.confirmed_violations_count }}
+                </div>
+            </div>
+
+            <!-- Vehicle Registration -->
+            <div style="background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); padding: 0.8rem 1.2rem; border-radius: 8px; min-width: 170px; text-align: center;">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Vehicle Registration</div>
+                <div style="margin-top: 0.3rem;">
+                    {% if fine_summary.primary_plate and fine_summary.primary_plate != 'UNREADABLE' %}
+                    <span style="display: inline-block; background: #fff; color: #000; font-family: monospace; font-weight: 800; font-size: 1.05rem; padding: 0.2rem 0.6rem; border-radius: 4px; border: 2px solid #000; letter-spacing: 0.08em; box-shadow: 0 2px 4px rgba(0,0,0,0.4);">
+                        🇮🇳 {{ fine_summary.primary_plate }}
+                    </span>
+                    {% else %}
+                    <span class="badge badge-amber" style="font-family: monospace; font-size: 0.85rem; padding: 0.3rem 0.6rem;">
+                        UNREADABLE / UNRECORDED
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Total Fines Issued -->
+            <div style="background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.08); padding: 0.8rem 1.2rem; border-radius: 8px; min-width: 130px; text-align: center;">
+                <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Fine Records</div>
+                <div style="font-size: 1.8rem; font-weight: 800; color: #38bdf8; line-height: 1.2; margin-top: 0.2rem;">
+                    {{ fine_summary.total_fines }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Category Breakdown by Violation Type -->
+    <div style="margin-top: 1.5rem;">
+        <div style="font-size: 0.82rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; margin-bottom: 0.8rem;">
+            Breakdown by Violation Type
+        </div>
+
+        {% if fine_summary.breakdown and fine_summary.breakdown|length > 0 %}
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
+            {% for b in fine_summary.breakdown %}
+            <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 1rem 1.2rem; display: flex; flex-direction: column; justify-content: space-between;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.5rem;">
+                    <div>
+                        <span class="badge {% if b.violation_type == 'no_helmet' %}badge-red{% elif b.violation_type == 'triple_riding' %}badge-amber{% else %}badge-red{% endif %}" style="font-size: 0.82rem;">
+                            {{ b.short_name|upper }}
+                        </span>
+                        <div style="font-size: 0.95rem; font-weight: 700; color: #fff; margin-top: 0.4rem;">
+                            {{ b.display_name }}
+                        </div>
+                    </div>
+                    <div style="text-align: right;">
+                        <span class="badge badge-blue" style="font-size: 0.8rem;">
+                            {{ b.count }} Violation{% if b.count != 1 %}s{% endif %}
+                        </span>
+                    </div>
+                </div>
+
+                <div style="font-size: 0.78rem; color: var(--text-dim); margin-bottom: 0.6rem; line-height: 1.4;">
+                    ⚖️ {{ b.legal_provision }}
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: baseline; border-top: 1px solid rgba(255, 255, 255, 0.06); padding-top: 0.5rem; margin-top: auto;">
+                    <div style="font-size: 0.78rem; color: var(--text-muted);">
+                        {% if b.unit_amount %}
+                        {{ b.count }} &times; ₹{{ '{:,.0f}'.format(b.unit_amount) }}
+                        {% else %}
+                        Statutory Rate
+                        {% endif %}
+                    </div>
+                    <div>
+                        {% if b.has_unavailable %}
+                        <span style="color: #fbbf24; font-weight: 700; font-size: 0.95rem;">Fine amount unavailable</span>
+                        {% else %}
+                        <span style="color: #34d399; font-weight: 800; font-size: 1.3rem;">₹{{ '{:,.0f}'.format(b.subtotal) }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="background: rgba(16, 185, 129, 0.05); border: 1px dashed rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 1.2rem; text-align: center; color: var(--text-dim); font-size: 0.88rem;">
+            🛡️ No confirmed violations detected in this analyzed image. Category penalties: <strong>₹0</strong>.
+        </div>
+        {% endif %}
     </div>
 </div>
 
@@ -76,7 +214,7 @@
                     &bull; Detections: <strong>{{ job.metadata.total_detections }}</strong>
                     {% endif %}
                 </div>
-                <div>Status: <span style="color: {% if job.total_violations > 0 %}#f87171{% elif job.metadata and job.metadata.total_detections == 0 %}#fbbf24{% else %}#34d399{% endif %}; font-weight: 600;">{{ job.status|upper }}</span></div>
+                <div>Status: <span class="{% if job.total_violations > 0 %}text-rose{% elif job.metadata and job.metadata.total_detections == 0 %}text-amber{% else %}text-emerald{% endif %}" style="font-weight: 600;">{{ job.status|upper }}</span></div>
             </div>
         </div>
     </div>
@@ -113,6 +251,9 @@
                             <span class="badge badge-red">
                                 NO HELMET
                             </span>
+                            {% endif %}
+                            {% if v.rider_id %}
+                            <span class="badge badge-purple" style="margin-left: 0.3rem;">{{ v.rider_id }}</span>
                             {% endif %}
                             {% if v.track_id %}
                             <span class="badge badge-blue" style="margin-left: 0.3rem;">Track ID: {{ v.track_id }}</span>
@@ -253,8 +394,130 @@
             </div>
             {% endif %}
             {% endif %}
+    </div>
+</div>
+
+<!-- Full Width: Automatic Traffic Violation Fines (Challans) Panel -->
+<div class="panel" style="margin-top: 2rem;">
+    <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <h2 class="panel-title" style="display: flex; align-items: center; gap: 0.6rem;">
+                <span>📋</span>
+                <span>Automatic Traffic Violation Fines (Challans)</span>
+                {% if fines and fines|length > 0 %}
+                <span class="badge badge-green">{{ fines|length }} Fines Generated</span>
+                {% endif %}
+            </h2>
+            <p style="font-size: 0.82rem; color: var(--text-dim); margin-top: 0.2rem;">
+                Statutory penalties calculated under the Motor Vehicles Act 1988 (as amended in 2019) for confirmed violations.
+            </p>
         </div>
+        {% if fines and fines|length > 0 %}
+        <div class="{% if fine_summary.is_incomplete %}fine-badge-incomplete{% else %}fine-badge-assessed{% endif %}" style="text-align: right; padding: 0.5rem 1rem; border-radius: 6px;">
+            <div class="{% if fine_summary.is_incomplete %}text-amber{% else %}text-emerald{% endif %}" style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Total Fine Assessed</div>
+            <div class="{% if fine_summary.is_incomplete %}text-amber{% else %}text-emerald{% endif %}" style="font-size: 1.6rem; font-weight: 800;">
+                {% if fine_summary.is_incomplete %}
+                INCOMPLETE
+                {% else %}
+                ₹{{ '{:,.0f}'.format(total_fine_amount or 0) }}
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
     </div>
 
+    {% if fines and fines|length > 0 %}
+    <div style="overflow-x: auto; margin-top: 1rem;">
+        <table class="table" style="width: 100%; border-collapse: collapse; font-size: 0.88rem;">
+            <thead>
+                <tr style="border-bottom: 1px solid var(--border-color); text-align: left; color: var(--text-muted);">
+                    <th style="padding: 0.75rem 1rem;">Fine ID</th>
+                    <th style="padding: 0.75rem 1rem;">Violation Type</th>
+                    <th style="padding: 0.75rem 1rem;">Vehicle Registration</th>
+                    <th style="padding: 0.75rem 1rem;">Legal Provision</th>
+                    <th style="padding: 0.75rem 1rem;">Jurisdiction</th>
+                    <th style="padding: 0.75rem 1rem;">Date & Time</th>
+                    <th style="padding: 0.75rem 1rem; text-align: right;">Fine Amount</th>
+                    <th style="padding: 0.75rem 1rem; text-align: center;">Evidence</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for f in fines %}
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 0.85rem 1rem; font-family: monospace; font-weight: 700; color: var(--cyan-accent);">
+                        {{ f.fine_id }}
+                    </td>
+                    <td style="padding: 0.85rem 1rem;">
+                        <span class="badge {% if f.violation_type == 'no_helmet' %}badge-red{% elif f.violation_type == 'triple_riding' %}badge-amber{% else %}badge-red{% endif %}">
+                            {{ f.violation_type|upper|replace('_', ' ') }}
+                        </span>
+                    </td>
+                    <td style="padding: 0.85rem 1rem;">
+                        {% if f.registration_number and f.registration_number != 'UNREADABLE' %}
+                        <span style="background: rgba(255,255,255,0.08); padding: 0.2rem 0.5rem; border-radius: 4px; font-family: monospace; font-weight: 700; color: #fff;">
+                            {{ f.registration_number }}
+                        </span>
+                        {% else %}
+                        <span class="badge badge-amber" style="font-family: monospace;">UNREADABLE</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.85rem 1rem; font-size: 0.82rem; color: #e2e8f0; max-width: 260px;">
+                        {{ f.legal_provision }}
+                    </td>
+                    <td style="padding: 0.85rem 1rem; font-size: 0.82rem; color: var(--text-dim);">
+                        {{ f.jurisdiction }}
+                    </td>
+                    <td style="padding: 0.85rem 1rem; font-size: 0.8rem; color: var(--text-dim);">
+                        {{ f.violation_timestamp }}
+                    </td>
+                    <td style="padding: 0.85rem 1rem; text-align: right; font-weight: 700; color: #34d399; font-size: 1.05rem;">
+                        {% if f.fine_amount is not none and f.status == 'ISSUED' %}
+                        ₹{{ '{:,.0f}'.format(f.fine_amount) }}
+                        {% else %}
+                        <span style="color: #fbbf24; font-size: 0.82rem; font-weight: 700;">Fine amount unavailable</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 0.85rem 1rem; text-align: center;">
+                        {% if f.evidence_path %}
+                        <a href="{{ f.evidence_path }}" target="_blank" title="View Evidence">
+                            <img src="{{ f.evidence_path }}" style="width: 42px; height: 42px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border-color);" alt="Evidence">
+                        </a>
+                        {% else %}
+                        <span style="color: var(--text-muted); font-size: 0.75rem;">N/A</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr style="border-top: 2px solid var(--border-color); background: rgba(255,255,255,0.02);">
+                    <td colspan="6" style="padding: 0.9rem 1rem; font-weight: 700; color: #fff; text-align: right;">
+                        Total Calculated Penalties ({{ fines|length }} Violations):
+                    </td>
+                    <td class="{% if fine_summary.is_incomplete %}text-amber{% else %}text-emerald{% endif %}" style="padding: 0.9rem 1rem; text-align: right; font-weight: 800; font-size: 1.25rem;">
+                        {% if fine_summary.is_incomplete %}
+                        <span style="font-size: 0.95rem;">INCOMPLETE (Fine amount unavailable)</span>
+                        {% else %}
+                        ₹{{ '{:,.0f}'.format(total_fine_amount or 0) }}
+                        {% endif %}
+                    </td>
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+    {% else %}
+    <div style="text-align: center; padding: 2.5rem 1rem; color: var(--text-dim);">
+        <div style="font-size: 1.8rem; margin-bottom: 0.4rem;">🛡️</div>
+        <div style="font-size: 1rem; color: #fff; font-weight: 600;">No Fines Issued for this Job</div>
+        <p style="font-size: 0.82rem; margin-top: 0.3rem;">
+            {% if violations and violations|length > 0 %}
+            Fines are automatically generated only for confirmed violations. Unconfirmed or pending review events do not incur fines until verified by an enforcement officer.
+            {% else %}
+            All detected vehicles and riders are compliant with traffic regulations.
+            {% endif %}
+        </p>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

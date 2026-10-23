@@ -9,12 +9,14 @@ from config import Config
 from services.database_service import DatabaseService
 from services.detection_service import DetectionService
 from services.video_processor import VideoProcessor
+from services.fine_service import FineService
 
 app = Flask(__name__)
 app.config.from_object(Config)
 
-# Initialize database
+# Initialize database & fine service
 db = DatabaseService()
+fine_service = FineService()
 
 # Global detector instance (lazy-loaded or singleton)
 detector = None
@@ -116,8 +118,9 @@ def upload():
         if file_type == 'image':
             out_path, violations, detections = processor.process_image(target_path)
             diag = processor.get_diagnostics()
-            confirmed_count = len([v for v in violations if v.get('review_status') != 'insufficient_evidence'])
-            candidate_count = len(violations) - confirmed_count
+            confirmed_count = len([v for v in violations if v.get('review_status') == 'confirmed'])
+            pending_count = len([v for v in violations if v.get('review_status') == 'pending'])
+            candidate_count = len([v for v in violations if v.get('review_status') == 'insufficient_evidence'])
             for v in violations:
                 v_id = db.insert_violation(
                     job_id=job_id,
@@ -128,6 +131,7 @@ def upload():
                     timestamp_sec=v.get('timestamp_sec', 0.0),
                     bbox=v.get('bounding_box'),
                     rider_count=v.get('rider_count'),
+                    rider_id=v.get('rider_id'),
                     plate_text=v.get('plate_text'),
                     plate_confidence=v.get('plate_confidence'),
                     evidence_path=v.get('evidence_path'),
@@ -135,6 +139,12 @@ def upload():
                     notes=v.get('reason')
                 )
                 v['id'] = v_id
+
+            # Automatically calculate fines and fine summary for confirmed violations
+            fine_summary = fine_service.get_job_fine_summary(job_id, violations=violations, db=db)
+            fines = fine_summary['fines']
+            total_fine_amount = fine_summary['total_fine_amount']
+
             rel_output = "/outputs/images/" + os.path.basename(out_path)
             meta = {
                 'permitted_direction': direction,
@@ -143,7 +153,11 @@ def upload():
                 'enable_vit': enable_vit,
                 'total_detections': len(detections),
                 'confirmed_violations': confirmed_count,
+                'pending_violations': pending_count,
                 'candidate_violations': candidate_count,
+                'total_fines': len(fines),
+                'total_fine_amount': total_fine_amount,
+                'fine_summary': fine_summary,
                 'detection_status': diag.get('status', 'violations_found' if len(violations) > 0 else ('compliant' if len(detections) > 0 else 'no_objects_detected')),
                 'diagnostic_message': diag.get('diagnostic_message', ''),
                 'wrong_side_status': diag.get('wrong_side_status', 'Wrong-side status could not be verified because reliable road-direction evidence was unavailable.'),
@@ -157,8 +171,9 @@ def upload():
         else: # video
             out_path, violations, total_frames = processor.process_video(target_path)
             diag = processor.get_diagnostics()
-            confirmed_count = len([v for v in violations if v.get('review_status') != 'insufficient_evidence'])
-            candidate_count = len(violations) - confirmed_count
+            confirmed_count = len([v for v in violations if v.get('review_status') == 'confirmed'])
+            pending_count = len([v for v in violations if v.get('review_status') == 'pending'])
+            candidate_count = len([v for v in violations if v.get('review_status') == 'insufficient_evidence'])
             for v in violations:
                 v_id = db.insert_violation(
                     job_id=job_id,
@@ -169,6 +184,7 @@ def upload():
                     timestamp_sec=v.get('timestamp_sec', 0.0),
                     bbox=v.get('bounding_box'),
                     rider_count=v.get('rider_count'),
+                    rider_id=v.get('rider_id'),
                     plate_text=v.get('plate_text'),
                     plate_confidence=v.get('plate_confidence'),
                     evidence_path=v.get('evidence_path'),
@@ -176,6 +192,12 @@ def upload():
                     notes=v.get('reason')
                 )
                 v['id'] = v_id
+
+            # Automatically calculate fines and fine summary for confirmed violations
+            fine_summary = fine_service.get_job_fine_summary(job_id, violations=violations, db=db)
+            fines = fine_summary['fines']
+            total_fine_amount = fine_summary['total_fine_amount']
+
             rel_output = "/outputs/videos/" + os.path.basename(out_path)
             meta = {
                 'permitted_direction': direction,
@@ -184,7 +206,11 @@ def upload():
                 'enable_vit': enable_vit,
                 'total_frames': total_frames,
                 'confirmed_violations': confirmed_count,
+                'pending_violations': pending_count,
                 'candidate_violations': candidate_count,
+                'total_fines': len(fines),
+                'total_fine_amount': total_fine_amount,
+                'fine_summary': fine_summary,
                 'detection_status': 'violations_found' if len(violations) > 0 else 'compliant',
                 'diagnostic_message': f"Processed {total_frames} video frames. Identified {len(violations)} distinct traffic violations." if len(violations) > 0 else f"Processed {total_frames} video frames. No traffic violations observed.",
                 'wrong_side_status': diag.get('wrong_side_status', 'Wrong-side status could not be verified because reliable road-direction evidence was unavailable.'),
@@ -205,6 +231,10 @@ def upload():
                 'total_violations': len(violations),
                 'confirmed_violations': confirmed_count,
                 'candidate_violations': candidate_count,
+                'total_fines': len(fines),
+                'total_fine_amount': total_fine_amount,
+                'fine_summary': fine_summary,
+                'fines': fines,
                 'violations': violations,
                 'total_detections': len(detections) if file_type == 'image' else None,
                 'diagnostics': diag,
@@ -233,7 +263,17 @@ def results(job_id):
         flash("Job not found.", "danger")
         return redirect(url_for('dashboard'))
     violations = db.get_violations_by_job(job_id)
-    return render_template('results.html', job=job, violations=violations)
+    fine_summary = fine_service.get_job_fine_summary(job_id, violations=violations, db=db)
+    fines = fine_summary['fines']
+    total_fine_amount = fine_summary['total_fine_amount']
+    return render_template(
+        'results.html',
+        job=job,
+        violations=violations,
+        fines=fines,
+        fine_summary=fine_summary,
+        total_fine_amount=total_fine_amount
+    )
 
 @app.route('/history')
 def history():
@@ -248,6 +288,12 @@ def violation_details(violation_id):
         new_status = request.form.get('review_status', 'pending')
         notes = request.form.get('reviewer_notes', '')
         db.update_violation_review(violation_id, new_status, notes)
+        v_rec = db.get_violation(violation_id)
+        if new_status == 'confirmed':
+            if v_rec:
+                fine_service.generate_fine_for_violation(v_rec, db=db)
+        else:
+            db.delete_fine_by_violation(violation_id)
         flash("Violation review status updated successfully.", "success")
         return redirect(url_for('violation_details', violation_id=violation_id))
 
@@ -255,7 +301,10 @@ def violation_details(violation_id):
     if not violation:
         flash("Violation record not found.", "danger")
         return redirect(url_for('history'))
-    return render_template('violation_details.html', violation=violation)
+    fine = db.get_fine_by_violation(violation_id)
+    if not fine and violation.get('review_status') == 'confirmed':
+        fine = fine_service.generate_fine_for_violation(violation, db=db)
+    return render_template('violation_details.html', violation=violation, fine=fine)
 
 @app.route('/download/<job_id>')
 def download(job_id):
@@ -284,6 +333,43 @@ def api_job_status(job_id):
     if not job:
         return jsonify({'error': 'Job not found'}), 404
     return jsonify(job)
+
+@app.route('/api/job/<job_id>/fines')
+def api_job_fines(job_id):
+    job = db.get_job(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    summary = fine_service.get_job_fine_summary(job_id, db=db)
+    return jsonify(summary)
+
+@app.route('/api/fine/<fine_id>')
+def api_fine_details(fine_id):
+    fine = db.get_fine(fine_id)
+    if not fine:
+        return jsonify({'error': 'Fine record not found'}), 404
+    return jsonify(fine)
+
+@app.route('/api/fine-schedule')
+def api_fine_schedule():
+    return jsonify(fine_service.schedule)
+
+@app.route('/api/fine-schedule/update', methods=['POST'])
+def api_fine_schedule_update():
+    data = request.get_json() or {}
+    vtype = data.get('violation_type')
+    if not vtype:
+        return jsonify({'error': 'violation_type is required'}), 400
+    success = fine_service.update_rule(
+        violation_type=vtype,
+        fine_amount=data.get('fine_amount'),
+        legal_provision=data.get('legal_provision'),
+        jurisdiction=data.get('jurisdiction'),
+        active=data.get('active'),
+        official_source=data.get('official_source')
+    )
+    if success:
+        return jsonify({'success': True, 'message': f"Fine rule for {vtype} updated successfully.", 'schedule': fine_service.schedule})
+    return jsonify({'error': 'Failed to persist fine schedule update'}), 500
 
 if __name__ == '__main__':
     # Initialize detector and ensure database is ready

@@ -31,10 +31,7 @@
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div style="padding: 0.9rem 1.2rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.92rem; 
-                                background: {% if category == 'danger' %}rgba(239,68,68,0.15); color:#fca5a5; border:1px solid rgba(239,68,68,0.3);
-                                            {% elif category == 'success' %}rgba(16,185,129,0.15); color:#6ee7b7; border:1px solid rgba(16,185,129,0.3);
-                                            {% else %}rgba(245,158,11,0.15); color:#fcd34d; border:1px solid rgba(245,158,11,0.3);{% endif %}">
+                    <div class="flash-alert flash-alert-{% if category == 'danger' %}danger{% elif category == 'success' %}success{% elif category == 'info' %}info{% else %}warning{% endif %}">
                         {{ message }}
                     </div>
                 {% endfor %}

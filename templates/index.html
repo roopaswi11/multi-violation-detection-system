@@ -75,17 +75,6 @@
             <canvas id="violationPieChart"></canvas>
         </div>
     </div>
-
-    <div class="panel">
-        <div class="panel-header">
-            <h2 class="panel-title">
-                <span style="color: var(--emerald);">◉</span> Review & Audit Workflow
-            </h2>
-        </div>
-        <div class="chart-wrapper">
-            <canvas id="reviewStatusChart"></canvas>
-        </div>
-    </div>
 </div>
 
 <!-- Recent Detection Jobs Table -->
@@ -128,7 +117,7 @@
                         </span>
                     </td>
                     <td>
-                        <strong style="color: {% if job.total_violations > 0 %}#f87171{% else %}#34d399{% endif %};">
+                        <strong class="{% if job.total_violations > 0 %}text-rose{% else %}text-emerald{% endif %}">
                             {{ job.total_violations }}
                         </strong>
                     </td>

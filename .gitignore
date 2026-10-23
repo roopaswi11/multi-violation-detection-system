@@ -1,2 +1,9 @@
-
 IMVTDataset/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.log
+scratch/
+services/*.bak

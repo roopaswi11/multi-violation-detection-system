@@ -11,6 +11,8 @@ class Config:
     DEFAULT_MODEL_PATH = os.path.join(MODELS_DIR, 'yolov11n.pt')
     CUSTOM_MODEL_PATH = os.path.join(MODELS_DIR, 'best.pt')
     WRONG_DIRECTION_MODEL_PATH = os.path.join(MODELS_DIR, 'wrong_direction_best.pt')
+    HEAD_CLASSIFIER_PATH = os.path.join(MODELS_DIR, 'head_classifier.pth')
+    POSE_MODEL_PATH = os.path.join(BASE_DIR, 'yolo11n-pose.pt')
     
     UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
     OUTPUTS_DIR = os.path.join(BASE_DIR, 'outputs')
@@ -19,6 +21,8 @@ class Config:
     OUTPUTS_EVIDENCE_DIR = os.path.join(OUTPUTS_DIR, 'evidence')
     
     DATABASE_PATH = os.path.join(BASE_DIR, 'database', 'traffic.db')
+    FINE_SCHEDULE_PATH = os.path.join(BASE_DIR, 'configs', 'fine_schedule.json')
+    DEFAULT_JURISDICTION = os.environ.get('DEFAULT_JURISDICTION', 'India (MV Act 2019)')
     DATA_DIR = os.path.join(BASE_DIR, 'data')
     SAMPLES_DIR = os.path.join(DATA_DIR, 'samples')
     
@@ -60,6 +64,17 @@ class Config:
     OCR_ENGINE = 'easyocr'  # 'easyocr' or 'tesseract'
     TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
     MIN_OCR_CONFIDENCE = 0.30
+
+    # Calibrated Per-Class Thresholds
+    HELMET_CONF_THRESHOLD = float(os.environ.get('HELMET_CONF_THRESHOLD', 0.20))
+    PLATE_CONF_THRESHOLD = float(os.environ.get('PLATE_CONF_THRESHOLD', 0.25))
+    VEHICLE_CONF_THRESHOLD = float(os.environ.get('VEHICLE_CONF_THRESHOLD', 0.25))
+    PERSON_CONF_THRESHOLD = float(os.environ.get('PERSON_CONF_THRESHOLD', 0.25))
+    MIN_HEAD_PIXELS = 18
+
+    # MongoDB Integration (Optional with SQLite fallback)
+    MONGO_URI = os.environ.get('MONGO_URI', None)
+    MONGO_DB_NAME = os.environ.get('MONGO_DB_NAME', 'traffic_violation_db')
 
 # Ensure all directories exist
 for path in [

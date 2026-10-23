@@ -16,6 +16,11 @@
             <span class="badge {% if violation.review_status == 'confirmed' %}badge-green{% elif violation.review_status == 'disputed' %}badge-red{% else %}badge-blue{% endif %}">
                 Status: {{ violation.review_status|capitalize }}
             </span>
+            {% if violation.rider_id %}
+            <span class="badge badge-purple">
+                {{ violation.rider_id }}
+            </span>
+            {% endif %}
         </div>
         <h1 class="page-title">Violation Evidence Audit #{{ violation.id }}</h1>
         <p class="page-subtitle">Job ID: <code>#{{ violation.job_id }}</code> &bull; Source: {{ violation.original_filename }} &bull; Recorded on {{ violation.created_at }}</p>
@@ -89,6 +94,12 @@
                 </div>
             </div>
 
+            {% if violation.rider_id %}
+            <div style="margin-bottom: 0.8rem; font-size: 0.9rem;">
+                <strong>Rider Designation:</strong> <span style="color: var(--cyan-accent); font-weight: 700;">{{ violation.rider_id }}</span>
+            </div>
+            {% endif %}
+
             {% if violation.rider_count %}
             <div style="margin-bottom: 0.8rem; font-size: 0.9rem;">
                 <strong>Rider Count Detected:</strong> <span style="color: var(--amber); font-weight: 700;">{{ violation.rider_count }} riders</span>
@@ -129,6 +140,74 @@
                 </div>
                 {% endif %}
             </div>
+        </div>
+
+        <!-- Statutory Fine / Challan Assessment Panel -->
+        <div class="panel">
+            <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <h2 class="panel-title" style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span>📜</span>
+                    <span>Statutory Fine Assessment</span>
+                </h2>
+                {% if fine %}
+                <span class="badge badge-green">Challan Issued</span>
+                {% elif violation.review_status == 'confirmed' %}
+                <span class="badge badge-blue">Generating Fine</span>
+                {% else %}
+                <span class="badge badge-amber">Pending Confirmation</span>
+                {% endif %}
+            </div>
+
+            {% if fine %}
+            <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 6px; padding: 1rem; margin-bottom: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem;">
+                    <div style="font-size: 0.75rem; color: #6ee7b7; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;">Fine ID (Challan #)</div>
+                    <div style="font-family: monospace; font-size: 1.1rem; font-weight: 800; color: #fff;">{{ fine.fine_id }}</div>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="font-size: 0.85rem; color: var(--text-dim);">Assessed Penalty:</div>
+                    <div style="font-size: 1.6rem; font-weight: 800; color: #34d399;">₹{{ '{:,.0f}'.format(fine.fine_amount) }} <span style="font-size: 0.85rem; color: #a7f3d0; font-weight: normal;">{{ fine.currency }}</span></div>
+                </div>
+            </div>
+
+            <div style="font-size: 0.85rem; margin-bottom: 0.7rem;">
+                <strong>Applicable Legal Provision:</strong>
+                <div style="color: #e2e8f0; margin-top: 0.2rem; background: var(--bg-secondary); padding: 0.5rem 0.7rem; border-radius: 4px; font-size: 0.82rem;">
+                    {{ fine.legal_provision }}
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; font-size: 0.82rem; margin-bottom: 0.8rem;">
+                <div>
+                    <span style="color: var(--text-dim);">Jurisdiction:</span>
+                    <div style="font-weight: 600; color: #fff;">{{ fine.jurisdiction }}</div>
+                </div>
+                <div>
+                    <span style="color: var(--text-dim);">Vehicle Plate:</span>
+                    {% if fine.registration_number and fine.registration_number != 'UNREADABLE' %}
+                    <div style="font-weight: 700; font-family: monospace; color: #fff;">
+                        {{ fine.registration_number }}
+                    </div>
+                    {% else %}
+                    <div style="font-weight: 700; font-family: monospace; color: var(--amber);">
+                        UNREADABLE
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div style="font-size: 0.78rem; color: var(--text-dim); border-top: 1px solid rgba(255,255,255,0.06); padding-top: 0.6rem;">
+                Fine Generated: <strong>{{ fine.created_at or fine.violation_timestamp }}</strong> &bull; Schedule Ver: <code>{{ fine.fine_rule_version }}</code>
+            </div>
+            {% else %}
+            <div style="padding: 1.2rem; text-align: center; color: var(--text-dim); font-size: 0.85rem;">
+                <div style="font-size: 1.6rem; margin-bottom: 0.4rem;">⏳</div>
+                <div style="font-weight: 600; color: #fff;">No Fine Generated Yet</div>
+                <p style="margin-top: 0.3rem; font-size: 0.8rem;">
+                    Fines are automatically issued once the violation is confirmed by an enforcement officer. Confirm this violation below to assess the statutory penalty.
+                </p>
+            </div>
+            {% endif %}
         </div>
 
         <!-- Reviewer Audit Workflow Form -->

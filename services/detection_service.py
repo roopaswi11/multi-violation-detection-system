@@ -87,12 +87,14 @@ class DetectionService:
         detections = []
 
         # 1. Primary Model Inference
-        # For fine-tuned helmet & plate classes, allow slightly lower threshold to prevent missing small objects
-        custom_conf = min(conf, 0.20) if self.is_custom_model else conf
+        # For fine-tuned helmet & plate classes, allow calibrated threshold to prevent missing small objects
+        custom_conf = min(conf, getattr(Config, 'HELMET_CONF_THRESHOLD', 0.18)) if self.is_custom_model else conf
+        img_size = getattr(Config, 'IMAGE_SIZE', 640)
         results = self.model(
             image_or_frame,
             conf=custom_conf,
             iou=iou,
+            imgsz=img_size,
             device=self.device,
             verbose=False
         )
@@ -115,10 +117,12 @@ class DetectionService:
 
         # 2. Base Model Inference (if vehicle/rider classes are needed)
         if self.base_model is not None:
+            base_conf = min(conf, getattr(Config, 'PERSON_CONF_THRESHOLD', 0.22))
             base_results = self.base_model(
                 image_or_frame,
-                conf=conf,
+                conf=base_conf,
                 iou=iou,
+                imgsz=img_size,
                 device=self.device,
                 verbose=False
             )
