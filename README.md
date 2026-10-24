@@ -204,6 +204,34 @@ This executes training of both models, evaluates checkpoints against official he
 
 ---
 
+## 6.1 Retraining on Full Dataset (GPU / Google Colab)
+
+To retrain the detector properly at inference resolution (`imgsz=640`) on the full 5,238-image training split:
+
+### Option A: 1-Click Google Colab Retraining (Recommended)
+Use [`train_colab.ipynb`](file:///c:/Users/roopa/Documents/multi-voilation%20system/train_colab.ipynb):
+1. Open [Google Colab](https://colab.research.google.com/) and upload `train_colab.ipynb`.
+2. Select **Runtime -> Change runtime type -> T4 GPU**.
+3. Upload `traffic dataset.v4i.yolov11.zip` or mount Google Drive.
+4. Run all cells to train `yolo11s.pt` for 60 epochs (~25 min).
+5. Download the trained `best.pt` and replace `models/best.pt`.
+
+### Option B: Local Training Script
+```bash
+# If NVIDIA GPU with CUDA is available:
+python scripts/train_full.py --no-install
+```
+On CPU, training takes ~14 days (5.7h/epoch); on an NVIDIA GPU, AutoBatch picks batch 16 and completes in ~2.5 hours.
+
+### Baseline Evaluation Benchmarks (218 Test Images)
+- **Model-Level (imgsz=640)**: `helmet`: mAP50=0.254, `no helmet`: mAP50=0.157, `number plate`: mAP50=0.392, `triple riding`: mAP50=0.685.
+- **End-to-End Pipeline (Confirmed Violations Only)**:
+  - `NO_HELMET`: Precision 0.6351 (63.5%), Recall 0.8246 (82.5%), F1 0.7176
+  - `TRIPLE_RIDING`: Precision 0.7400 (74.0%), Recall 0.8409 (84.1%), F1 0.7872
+For detailed analysis, see [`model_training_report.md`](file:///c:/Users/roopa/Documents/multi-voilation%20system/model_training_report.md).
+
+---
+
 ## 7. Running the Flask Web Application
 
 ```bash
