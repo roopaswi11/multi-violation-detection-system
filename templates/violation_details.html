@@ -123,20 +123,47 @@
                 <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.4rem; color: var(--text-main);">
                     License Plate OCR Extraction
                 </div>
-                {% if violation.plate_text %}
-                <div style="display: flex; align-items: center; gap: 0.8rem; background: var(--bg-secondary); padding: 0.75rem 1rem; border-radius: 6px;">
-                    <div style="font-family: monospace; font-size: 1.2rem; font-weight: 700; color: #fff; letter-spacing: 0.05em;">
-                        {{ violation.plate_text }}
+                {% if violation.plate_text and violation.plate_text != 'UNREADABLE' %}
+                <div style="display: flex; flex-direction: column; gap: 0.6rem; background: var(--bg-secondary); padding: 0.85rem 1.1rem; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+                        <div style="display: flex; align-items: center; gap: 0.6rem;">
+                            <span style="font-size: 1.1rem;">🇮🇳</span>
+                            <div style="font-family: monospace; font-size: 1.3rem; font-weight: 700; color: #fff; letter-spacing: 0.08em;">
+                                {{ violation.plate_text }}
+                            </div>
+                            {% if violation.plate_status == 'readable' %}
+                            <span style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.72rem; font-weight: 600; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3);">READABLE</span>
+                            {% elif violation.plate_status == 'partial' %}
+                            <span style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 0.72rem; font-weight: 600; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid rgba(245, 158, 11, 0.3);">PARTIAL</span>
+                            {% endif %}
+                        </div>
+                        {% if violation.plate_confidence %}
+                        <span style="font-size: 0.8rem; color: var(--text-dim);">
+                            OCR Confidence: <strong>{{ (violation.plate_confidence * 100)|round(1) }}%</strong>
+                        </span>
+                        {% endif %}
                     </div>
-                    {% if violation.plate_confidence %}
-                    <span style="font-size: 0.75rem; color: var(--text-muted);">
-                        (OCR Conf: {{ (violation.plate_confidence * 100)|round(1) }}%)
-                    </span>
+                    {% if violation.raw_plate_text %}
+                    <div style="font-size: 0.75rem; color: var(--text-dim); border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.4rem;">
+                        Raw OCR Extraction: <code>{{ violation.raw_plate_text }}</code>
+                    </div>
+                    {% endif %}
+                    {% if violation.plate_crop_path %}
+                    <div style="margin-top: 0.3rem;">
+                        <a href="{{ violation.plate_crop_path }}" target="_blank" style="display: inline-block;">
+                            <img src="{{ violation.plate_crop_path }}" alt="Plate Evidence Crop" style="max-height: 60px; border-radius: 4px; border: 1px solid var(--border-color); background: #000;" />
+                        </a>
+                    </div>
                     {% endif %}
                 </div>
                 {% else %}
-                <div style="color: var(--text-dim); font-size: 0.85rem; font-style: italic;">
-                    Plate unreadable or obscured in this frame. Manual review suggested.
+                <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(100, 116, 139, 0.1); padding: 0.75rem 1rem; border-radius: 6px; border: 1px solid rgba(100, 116, 139, 0.2);">
+                    <div style="color: var(--text-dim); font-size: 0.85rem; font-style: italic;">
+                        ⚠️ License plate unreadable or obscured in this evidence frame. Flagged for manual review.
+                    </div>
+                    {% if violation.plate_crop_path %}
+                    <a href="{{ violation.plate_crop_path }}" target="_blank" style="font-size: 0.78rem; color: var(--accent); text-decoration: none;">[View Crop]</a>
+                    {% endif %}
                 </div>
                 {% endif %}
             </div>

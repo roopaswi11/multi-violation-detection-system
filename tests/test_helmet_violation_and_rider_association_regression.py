@@ -149,7 +149,6 @@ class TestHelmetAndRiderAssociationRegression(unittest.TestCase):
         dets = [bike, rider]
         h_viols = self.helmet_detector.analyze(self.frame, dets)
         self.assertIsInstance(h_viols, list)
-
     def test_case_10_image_with_no_violations(self):
         """10. Scene with only passenger cars: 0 violations, status compliant."""
         car = {'bbox': [100.0, 150.0, 350.0, 320.0], 'class_name': 'car', 'confidence': 0.90}
@@ -158,6 +157,43 @@ class TestHelmetAndRiderAssociationRegression(unittest.TestCase):
         t_viols = self.triple_detector.analyze(self.frame, dets, is_video=False)
         self.assertEqual(len(h_viols), 0)
         self.assertEqual(len(t_viols), 0)
+
+    def test_case_11_foreground_scooter_with_distant_background_persons(self):
+        """11. Foreground scooter with distant background persons: Background persons must NOT be counted on foreground bike."""
+        # Wide foreground scooter
+        fg_bike = {'bbox': [120.0, 65.0, 394.0, 253.0], 'class_name': 'motorcycle', 'confidence': 0.85}
+        fg_rider = {'bbox': [213.0, 30.0, 305.0, 266.0], 'class_name': 'person', 'confidence': 0.88}
+        fg_helmet = {'bbox': [208.0, 16.0, 303.0, 242.0], 'class_name': 'helmet', 'confidence': 0.85}
+        
+        # Distant background persons overlapping horizontally with the wide scooter box
+        bg_p1 = {'bbox': [145.0, 10.0, 198.0, 112.0], 'class_name': 'person', 'confidence': 0.56} # small distant person (h=102 vs 236)
+        bg_p2 = {'bbox': [190.0, 20.0, 218.0, 78.0], 'class_name': 'person', 'confidence': 0.38}  # tiny distant person (h=58 vs 236)
+        
+        dets = [fg_bike, fg_rider, fg_helmet, bg_p1, bg_p2]
+        h_viols = self.helmet_detector.analyze(self.frame, dets)
+        t_viols = self.triple_detector.analyze(self.frame, dets, is_video=False)
+        
+        # Must produce 0 helmet violations and 0 triple riding violations
+        self.assertEqual(len(h_viols), 0)
+        self.assertEqual(len(t_viols), 0)
+        
+        # Verify assigned riders on fg_bike is exactly 1 (the foreground rider)
+        assigned = self.triple_detector.associate_riders_to_motorcycles([fg_bike], [fg_rider, bg_p1, bg_p2])
+        self.assertEqual(len(assigned[0]), 1)
+        self.assertEqual(assigned[0][0]['bbox'], fg_rider['bbox'])
+
+    def test_case_12_genuine_triple_riding_preserved(self):
+        """12. Genuine triple riding on 1 motorcycle: Must reliably detect 1 triple riding violation."""
+        bike = {'bbox': [104.0, 125.0, 470.0, 276.0], 'class_name': 'motorcycle', 'confidence': 0.80}
+        r1 = {'bbox': [246.0, 0.0, 402.0, 276.0], 'class_name': 'person', 'confidence': 0.85} # driver
+        r2 = {'bbox': [192.0, 7.0, 340.0, 276.0], 'class_name': 'person', 'confidence': 0.75}  # pillion 1
+        r3 = {'bbox': [192.0, 5.0, 280.0, 184.0], 'class_name': 'person', 'confidence': 0.65}  # pillion 2
+        
+        dets = [bike, r1, r2, r3]
+        t_viols = self.triple_detector.analyze(self.frame, dets, is_video=False)
+        self.assertEqual(len(t_viols), 1)
+        self.assertEqual(t_viols[0]['violation_type'], 'triple_riding')
+        self.assertEqual(t_viols[0]['rider_count'], 3)
 
 if __name__ == '__main__':
     unittest.main()

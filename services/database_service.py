@@ -109,14 +109,15 @@ class DatabaseService:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_fines_job_id ON fines (job_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_fines_violation_id ON fines (violation_id)')
             
-            # Migrate table if rider_id column is missing
+            # Migrate table if rider_id or plate audit columns are missing
             cursor.execute("PRAGMA table_info(violations)")
             columns = [row['name'] for row in cursor.fetchall()]
-            if 'rider_id' not in columns:
-                try:
-                    cursor.execute("ALTER TABLE violations ADD COLUMN rider_id TEXT")
-                except Exception:
-                    pass
+            for col in ['rider_id', 'plate_status', 'raw_plate_text', 'plate_crop_path']:
+                if col not in columns:
+                    try:
+                        cursor.execute(f"ALTER TABLE violations ADD COLUMN {col} TEXT")
+                    except Exception:
+                        pass
 
             conn.commit()
 
@@ -180,7 +181,8 @@ class DatabaseService:
     def insert_violation(self, job_id, violation_type, confidence, track_id=None,
                          frame_number=None, timestamp_sec=None, bbox=None,
                          rider_count=None, rider_id=None, plate_text=None, plate_confidence=None,
-                         evidence_path=None, review_status='pending', notes=None):
+                         evidence_path=None, review_status='pending', notes=None,
+                         plate_status=None, raw_plate_text=None, plate_crop_path=None):
         bbox_str = json.dumps(bbox) if bbox is not None else None
         conf_val = float(confidence) if confidence is not None else 0.0
         v_id = None
@@ -190,12 +192,14 @@ class DatabaseService:
                 INSERT INTO violations (
                     job_id, violation_type, confidence, track_id,
                     frame_number, timestamp_sec, bbox_json, rider_count, rider_id,
-                    plate_text, plate_confidence, evidence_path, review_status, reviewer_notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    plate_text, plate_confidence, evidence_path, review_status, reviewer_notes,
+                    plate_status, raw_plate_text, plate_crop_path
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 job_id, violation_type, conf_val, track_id,
                 frame_number, timestamp_sec, bbox_str, rider_count, rider_id,
-                plate_text, plate_confidence, evidence_path, review_status, notes
+                plate_text, plate_confidence, evidence_path, review_status, notes,
+                plate_status, raw_plate_text, plate_crop_path
             ))
             conn.commit()
             v_id = cursor.lastrowid
@@ -215,6 +219,9 @@ class DatabaseService:
                     'rider_id': rider_id,
                     'plate_text': plate_text,
                     'plate_confidence': plate_confidence,
+                    'plate_status': plate_status,
+                    'raw_plate_text': raw_plate_text,
+                    'plate_crop_path': plate_crop_path,
                     'evidence_path': evidence_path,
                     'review_status': review_status,
                     'notes': notes,

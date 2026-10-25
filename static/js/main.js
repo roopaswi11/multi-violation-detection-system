@@ -372,15 +372,24 @@ function setupUploadPage() {
                                             </div>
                                         ` : '')}
 
-                                        ${v.plate_text ? `
-                                            <div style="font-size: 0.85rem; color: var(--text-main); margin-bottom: 0.2rem;">
-                                                🪪 <strong>Plate OCR:</strong>
-                                                <span style="background: rgba(255,255,255,0.08); padding: 0.15rem 0.4rem; border-radius: 4px; font-family: monospace; font-weight: 700; color: #e2e8f0;">
-                                                    ${v.plate_text}
+                                        ${v.plate_text && v.plate_text !== 'UNREADABLE' ? `
+                                            <div style="font-size: 0.85rem; color: var(--text-main); margin-bottom: 0.25rem; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+                                                🪪 <strong>Plate:</strong>
+                                                <span style="background: rgba(255,255,255,0.08); padding: 0.15rem 0.45rem; border-radius: 4px; font-family: monospace; font-weight: 700; color: #f8fafc; border: 1px solid rgba(255,255,255,0.12);">
+                                                    🇮🇳 ${v.plate_text}
                                                 </span>
-                                                ${v.plate_confidence ? `<span style="font-size: 0.75rem; color: var(--text-dim);">(${Math.round(v.plate_confidence * 100)}%)</span>` : ''}
+                                                ${v.plate_status === 'readable' ? `<span style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.68rem; font-weight: 600; padding: 0.1rem 0.35rem; border-radius: 3px; border: 1px solid rgba(16, 185, 129, 0.3);">READABLE</span>` : (v.plate_status === 'partial' ? `<span style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 0.68rem; font-weight: 600; padding: 0.1rem 0.35rem; border-radius: 3px; border: 1px solid rgba(245, 158, 11, 0.3);">PARTIAL</span>` : '')}
+                                                ${v.plate_confidence ? `<span style="font-size: 0.72rem; color: var(--text-dim);">(${Math.round(v.plate_confidence * 100)}%)</span>` : ''}
+                                                ${v.plate_crop_path ? `<a href="${v.plate_crop_path}" target="_blank" style="font-size: 0.72rem; color: var(--accent); text-decoration: none; margin-left: auto;">[Plate Crop]</a>` : ''}
                                             </div>
-                                        ` : ''}
+                                        ` : (v.plate_text === 'UNREADABLE' || v.plate_status === 'unreadable' ? `
+                                            <div style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.25rem; display: flex; align-items: center; gap: 0.4rem;">
+                                                🪪 <strong>Plate:</strong>
+                                                <span style="background: rgba(100, 116, 139, 0.15); color: #94a3b8; font-size: 0.72rem; font-weight: 600; padding: 0.15rem 0.4rem; border-radius: 3px; border: 1px solid rgba(100, 116, 139, 0.3);">
+                                                    UNREADABLE (Manual Review)
+                                                </span>
+                                            </div>
+                                        ` : '')}
 
                                         ${v.frame_number !== undefined && v.frame_number !== null ? `
                                             <div style="font-size: 0.78rem; color: var(--text-dim);">

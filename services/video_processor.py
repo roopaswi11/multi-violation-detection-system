@@ -1,6 +1,7 @@
 import os
 import cv2
 import time
+import uuid
 from config import Config
 from services.detection_service import DetectionService
 from services.tracking_service import TrackingService
@@ -73,18 +74,55 @@ class VideoProcessor:
         for idx, d in enumerate(detections):
             print(f"  [{idx+1}] {d['class_name']} ({d['confidence']:.2f}) -> bbox: {d['bbox']}")
 
-        # 2. Extract number plates
+        # 2. Extract number plates across all detected vehicles (two-wheelers, four-wheelers, etc.)
         plate_results = []
-        bikes = [d for d in detections if d['class_name'].lower().replace('_', ' ').strip() in ['motorcycle', 'bike', 'two wheeler', 'two_wheeler']]
+        bikes = [d for d in detections if d['class_name'].lower().replace('_', ' ').strip() in ['motorcycle', 'bike', 'two wheeler', 'two_wheeler', 'scooter']]
+        four_wheelers = [d for d in detections if d['class_name'].lower().replace('_', ' ').strip() in ['car', 'truck', 'bus', 'autorickshaw', 'auto']]
         riders = [d for d in detections if d['class_name'].lower().replace('_', ' ').strip() in ['person', 'rider', 'driver', 'pillion']]
         direct_plates = [d for d in detections if 'plate' in d['class_name'].lower()]
         
+        # Extract from motorcycles / scooters
         for bike in bikes:
-            crop, pbox = self.plate_ocr.crop_plate_for_bike(frame, bike['bbox'], direct_plates)
-            if crop is not None:
-                res = self.plate_ocr.extract_text(crop)
-                res['bbox'] = pbox
-                plate_results.append(res)
+            res = self.plate_ocr.extract_plate_from_vehicle(frame, bike['bbox'], direct_plates=direct_plates, vehicle_type='motorcycle')
+            if res:
+                res['vehicle_bbox'] = bike['bbox']
+                if res.get('normalized_text') != 'UNREADABLE':
+                    plate_results.append(res)
+                elif res.get('bbox'):
+                    plate_results.append(res)
+
+        # Extract from four-wheelers
+        for veh in four_wheelers:
+            res = self.plate_ocr.extract_plate_from_vehicle(frame, veh['bbox'], direct_plates=direct_plates, vehicle_type='car')
+            if res:
+                res['vehicle_bbox'] = veh['bbox']
+                if res.get('normalized_text') != 'UNREADABLE':
+                    plate_results.append(res)
+                elif res.get('bbox'):
+                    plate_results.append(res)
+
+        # Extract from standalone or unassociated direct plates
+        if direct_plates:
+            has_readable = any(pr.get('status') in ['readable', 'partial'] and pr.get('normalized_text') not in ['', 'UNREADABLE'] for pr in plate_results)
+            if not has_readable or not plate_results:
+                for p in direct_plates:
+                    px1, py1, px2, py2 = [int(v) for v in p['bbox']]
+                    pad_x = max(6, int((px2 - px1) * 0.14))
+                    pad_y = max(5, int((py2 - py1) * 0.14))
+                    c_px1 = max(0, px1 - pad_x)
+                    c_py1 = max(0, py1 - pad_y)
+                    c_px2 = min(w, px2 + pad_x)
+                    c_py2 = min(h, py2 + pad_y)
+                    crop = frame[c_py1:c_py2, c_px1:c_px2]
+                    if crop.size > 0:
+                        res = self.plate_ocr.extract_text(crop)
+                        res['bbox'] = [c_px1, c_py1, c_px2, c_py2]
+                        if res.get('status') in ['readable', 'partial'] and res.get('normalized_text') not in ['', 'UNREADABLE']:
+                            uid = uuid.uuid4().hex[:8]
+                            fname = f"plate_{uid}.jpg"
+                            cv2.imwrite(os.path.join(Config.OUTPUTS_EVIDENCE_DIR, fname), crop)
+                            res['crop_path'] = f"/outputs/evidence/{fname}"
+                            plate_results.append(res)
 
         # 3. Analyze helmet violations
         helmet_violations = self.helmet_detector.analyze(frame, detections, track_id=None, frame_idx=0)
@@ -131,6 +169,7 @@ class VideoProcessor:
             'total_detections': len(detections),
             'class_summary': class_summary,
             'violations_count': len(violations),
+            'rider_evaluations': getattr(self.helmet_detector, 'last_rider_evaluations', []),
             'status': status_desc,
             'diagnostic_message': diag_msg,
             'permitted_direction': self.permitted_direction,
@@ -141,15 +180,13 @@ class VideoProcessor:
         }
 
         # 7. Draw annotations:
-        # Each motorcycle bounding box is drawn exactly once.
-        # Violating motorcycles are highlighted with a single prominent banner in _draw_violation_overlays.
+        # Suppress raw uncalibrated/conflicting helmet boxes from base detections to prevent
+        # drawing confusing false-positive boxes that conflict with validated head analysis.
         violating_bboxes = [v['bounding_box'] for v in violations if v.get('bounding_box')]
         base_detections = []
         for d in detections:
             cname = d['class_name'].lower().replace('_', ' ').strip()
-            # Suppress raw uncalibrated/conflicting no-helmet boxes from base detections.
-            # Genuine validated violations are drawn cleanly and authoritatively in _draw_violation_overlays.
-            if 'helmet' in cname and 'no' in cname:
+            if 'helmet' in cname:
                 continue
             is_violating_bike = False
             if 'bike' in cname or 'motorcycle' in cname:
@@ -161,13 +198,16 @@ class VideoProcessor:
                 base_detections.append(d)
 
         annotated = self.detector.draw_detections(frame, base_detections)
-        annotated = self._draw_violation_overlays(annotated, violations, plate_results)
+        rider_evals = getattr(self.helmet_detector, 'last_rider_evaluations', [])
+        annotated = self._draw_violation_overlays(annotated, violations, plate_results, rider_evaluations=rider_evals)
 
         # Save annotated image
         if not output_path:
             bname = os.path.basename(image_path)
             output_path = os.path.join(Config.OUTPUTS_IMAGES_DIR, f"annotated_{bname}")
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        out_dir = os.path.dirname(output_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
         cv2.imwrite(output_path, annotated)
 
         return output_path, violations, detections
@@ -235,6 +275,7 @@ class VideoProcessor:
 
                 # Group by motorcycle tracks
                 bike_dets = [d for d in tracked_detections if d['class_name'].lower() in ['motorcycle', 'bike']]
+                other_veh_dets = [d for d in tracked_detections if d['class_name'].lower().replace('_', ' ').strip() in ['car', 'truck', 'bus', 'autorickshaw', 'auto']]
                 for bike in bike_dets:
                     tid = bike.get('track_id')
                     
@@ -259,11 +300,23 @@ class VideoProcessor:
                 if frame_idx % 5 == 1:
                     direct_plates = [d for d in tracked_detections if 'plate' in d['class_name'].lower()]
                     for bike in bike_dets:
-                        crop, pbox = self.plate_ocr.crop_plate_for_bike(frame, bike['bbox'], direct_plates)
-                        if crop is not None:
-                            p_res = self.plate_ocr.extract_text(crop)
-                            p_res['bbox'] = pbox
-                            plate_results.append(p_res)
+                        p_res = self.plate_ocr.extract_plate_from_vehicle(frame, bike['bbox'], direct_plates=direct_plates, vehicle_type='motorcycle')
+                        if p_res:
+                            p_res['vehicle_bbox'] = bike['bbox']
+                            p_res['track_id'] = bike.get('track_id')
+                            if p_res.get('normalized_text') != 'UNREADABLE':
+                                plate_results.append(p_res)
+                            elif p_res.get('bbox'):
+                                plate_results.append(p_res)
+                    for veh in other_veh_dets:
+                        p_res = self.plate_ocr.extract_plate_from_vehicle(frame, veh['bbox'], direct_plates=direct_plates, vehicle_type='car')
+                        if p_res:
+                            p_res['vehicle_bbox'] = veh['bbox']
+                            p_res['track_id'] = veh.get('track_id')
+                            if p_res.get('normalized_text') != 'UNREADABLE':
+                                plate_results.append(p_res)
+                            elif p_res.get('bbox'):
+                                plate_results.append(p_res)
 
                 # 6. Aggregate & deduplicate frame violations
                 frame_v = self.aggregator.aggregate_frame(
@@ -279,7 +332,8 @@ class VideoProcessor:
                     annotated, frame_wrong_side_violations
                 )
                 annotated = self._draw_violation_overlays(
-                    annotated, frame_helmet_violations + frame_triple_violations + frame_wrong_side_violations, plate_results
+                    annotated, frame_helmet_violations + frame_triple_violations + frame_wrong_side_violations, plate_results,
+                    rider_evaluations=getattr(self.helmet_detector, 'last_rider_evaluations', [])
                 )
                 
                 # Write frame
@@ -310,9 +364,10 @@ class VideoProcessor:
         }
         return output_path, final_violations, total_frames
 
-    def _draw_violation_overlays(self, frame, violations, plate_results=None):
+    def _draw_violation_overlays(self, frame, violations, plate_results=None, rider_evaluations=None):
         """
-        Draws high-visibility warning pill badges and plates on detected violators.
+        Draws high-visibility warning pill badges and plates on detected violators,
+        and renders explicit status badges (HELMET WORN / UNCERTAIN / NO HELMET) for all riders.
         Deduplicates overlapping bounding boxes to avoid drawing duplicate boxes.
         """
         annotated = frame.copy()
@@ -320,6 +375,37 @@ class VideoProcessor:
 
         drawn_boxes = []
 
+        # 1. Draw non-violating rider status badges (HELMET WORN and UNCERTAIN)
+        if rider_evaluations:
+            for reval in rider_evaluations:
+                status = reval.get('status')
+                if status == 'NO_HELMET':
+                    # Explicitly handled with prominent violation styling below
+                    continue
+                hbox = reval.get('head_box') or reval.get('rider_box')
+                if not hbox or len(hbox) < 4:
+                    continue
+                hx1, hy1, hx2, hy2 = [int(v) for v in hbox]
+                rid = reval.get('rider_id', 'Rider')
+                conf = reval.get('confidence', 0.0)
+
+                if status == 'HELMET_WORN':
+                    color = (0, 180, 0)  # Green
+                    text = f"HELMET WORN: {rid} ({conf:.0%})" if conf > 0 else f"HELMET WORN: {rid}"
+                else:  # UNCERTAIN
+                    color = (130, 130, 130)  # Neutral Gray / Amber
+                    text = f"UNCERTAIN: {rid}"
+
+                # Draw subtle head outline
+                cv2.rectangle(annotated, (hx1, hy1), (hx2, hy2), color, 2)
+                (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1)
+                by1 = max(0, hy1 - th - 6)
+                by2 = hy1
+                cv2.rectangle(annotated, (hx1, by1), (hx1 + tw + 6, by2), color, -1)
+                cv2.putText(annotated, text, (hx1 + 3, hy1 - 3),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
+
+        # 2. Draw confirmed violations (NO HELMET, WRONG SIDE, TRIPLE RIDING)
         for v in violations:
             bbox = v.get('bounding_box')
             if not bbox or len(bbox) < 4:
@@ -327,11 +413,12 @@ class VideoProcessor:
             x1, y1, x2, y2 = [int(val) for val in bbox]
             vtype = v.get('violation_type', '')
             is_cand = v.get('review_status') == 'insufficient_evidence' or v.get('is_candidate') or v.get('assessment_type') == 'image'
+            conf = v.get('confidence', 1.0)
             
             # Badge text and color
             if vtype == 'no_helmet':
                 rider_label = v.get('rider_id') or 'Rider'
-                text = f"NO HELMET: {rider_label}"
+                text = f"NO HELMET: {rider_label} ({conf:.0%})" if conf is not None else f"NO HELMET: {rider_label}"
                 color = (0, 0, 220)  # Red
             elif vtype == 'triple_riding':
                 rc = v.get('rider_count', 3)
@@ -348,31 +435,43 @@ class VideoProcessor:
                 text = f"VIOLATION: {vtype.upper()}"
                 color = (0, 0, 220)
 
-            # Check if this box was already drawn for another violation on the same object
+            # Check if this box or its parent vehicle overlaps an already drawn violation box
             offset_y = 0
             for prev_box, prev_h in drawn_boxes:
-                if self.aggregator._compute_iou(prev_box, bbox) > 0.60:
+                if self.aggregator._compute_iou(prev_box, bbox) > 0.45:
                     offset_y += prev_h + 4
 
-            # Draw prominent violation outline only once per object
+            # Draw prominent violation outline only once per target box
             if offset_y == 0:
                 cv2.rectangle(annotated, (max(0, x1 - 2), max(0, y1 - 2)),
                               (min(w - 1, x2 + 2), min(h - 1, y2 + 2)), color, 3)
 
-            # Draw upper banner tag (stacked if multiple violations on same vehicle)
-            (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 2)
-            banner_y1 = max(0, y1 - th - 10 - offset_y)
-            banner_y2 = max(th + 10, y1 - offset_y)
-            cv2.rectangle(annotated, (x1, banner_y1), (x1 + tw + 10, banner_y2), color, -1)
-            cv2.putText(annotated, text, (x1 + 5, banner_y2 - 6),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2, cv2.LINE_AA)
+            # Draw banner tag with intelligent boundary handling
+            f_scale = 0.42 if w < 600 else 0.50
+            f_thick = 1
+            (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, f_scale, f_thick)
+            
+            # If box is too close to top edge, place banner just below top edge or inside top
+            if y1 < (th + 10 + offset_y):
+                banner_y1 = y1 + offset_y
+                banner_y2 = y1 + th + 6 + offset_y
+                text_y = banner_y2 - 3
+            else:
+                banner_y1 = max(0, y1 - th - 6 - offset_y)
+                banner_y2 = max(th + 6, y1 - offset_y)
+                text_y = banner_y2 - 3
+                
+            banner_x2 = min(w - 1, x1 + tw + 8)
+            cv2.rectangle(annotated, (x1, banner_y1), (banner_x2, banner_y2), color, -1)
+            cv2.putText(annotated, text, (x1 + 4, text_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, f_scale, (255, 255, 255), f_thick, cv2.LINE_AA)
 
-            drawn_boxes.append((bbox, th + 10))
+            drawn_boxes.append((bbox, th + 8))
 
-        # Draw plate tags
+        # 3. Draw plate tags
         if plate_results:
             for pr in plate_results:
-                if pr.get('status') == 'readable' and pr.get('bbox'):
+                if pr.get('status') in ['readable', 'partial'] and pr.get('bbox') and pr.get('normalized_text') not in ['', 'UNREADABLE']:
                     px1, py1, px2, py2 = [int(val) for val in pr['bbox']]
                     ptext = f"PLATE: {pr['normalized_text']}"
                     cv2.rectangle(annotated, (px1, py1), (px2, py2), (255, 0, 255), 2)

@@ -110,44 +110,47 @@ class HelmetDetector:
         bh = max(1.0, by2 - by1)
         bcx = (bx1 + bx2) / 2.0
         
-        # 1. Horizontal alignment: rider center must be within motorcycle horizontal span (+ 15% margin)
-        h_margin = bw * 0.15
+        # 1. Horizontal alignment: rider center must be within motorcycle horizontal span (+ 20% margin)
+        h_margin = bw * 0.20
         if not (bx1 - h_margin <= pcx <= bx2 + h_margin):
             return 0.0
             
         inter_x = max(0.0, min(px2, bx2) - max(px1, bx1))
-        if inter_x / pw < 0.25:
+        if inter_x / pw < 0.20:
             return 0.0
 
         # 2. Vertical Mount & Seating Sanity:
-        foot_offset_from_base = (by2 - py2) / bh
-        if foot_offset_from_base > 0.55:
-            return 0.0
-
         # Rider top (head) must extend above or near top of bike
         if py1 > by1 + 0.45 * bh:
             return 0.0
 
-        # Rider bottom cannot extend far below bike base (pedestrian standing on ground)
-        if py2 > by2 + 0.20 * bh:
+        # Rider body must overlap or enter the motorcycle vertically
+        # Rider bottom must reach at or into the bike top
+        if py2 < by1 - 0.05 * bh:
+            return 0.0
+
+        # Rider bottom cannot extend far below bike base (pedestrian standing far below bike)
+        if py2 > by2 + 0.25 * bh:
             return 0.0
 
         # 3. Relative Scale Sanity (Perspective depth check)
-        if ph < 0.35 * bh or ph > 2.5 * bh:
+        if ph < 0.35 * bh or ph > 3.0 * bh:
             return 0.0
 
-        inter_y = max(0.0, min(py2, by2) - max(py1, py1))
+        inter_y = max(0.0, min(py2, by2) - max(py1, by1))
+        if inter_y <= 0:
+            return 0.0
+            
         overlap = (inter_x * inter_y) / (pw * ph)
-        
+        vert_penetration = inter_y / max(1.0, min(ph, bh))
         h_dist = abs(pcx - bcx) / bw
-        foot_dist = max(0.0, foot_offset_from_base)
         
-        score = overlap * (1.0 - 0.35 * min(1.0, h_dist)) * (1.0 - 0.40 * min(1.0, foot_dist))
-        return max(0.01, score)
+        score = (0.5 * overlap + 0.5 * min(1.0, vert_penetration)) * (1.0 - 0.25 * min(1.0, h_dist))
+        return score
 
     @classmethod
     def is_rider_on_bike(cls, person_box, bike_box):
-        return cls.get_rider_bike_association_score(person_box, bike_box) > 0.0
+        return cls.get_rider_bike_association_score(person_box, bike_box) >= 0.08
 
     def extract_head_crop(self, frame, person_box):
         """
@@ -254,33 +257,47 @@ class HelmetDetector:
     def associate_riders_to_motorcycles(cls, bikes, persons):
         """
         Associates persons with motorcycles using 2-pass physical geometry:
-        Pass 1: Direct seated mount assignment (exclusive, 1 rider to at most 1 bike).
-        Pass 2: Tandem recovery for partially occluded tandem riders (scale >= 0.55, aligned seat).
+        Pass 1: Direct seated mount assignment (at most 1 primary driver per bike).
+        Pass 2: Tandem recovery for genuine tandem riders relative to the mounted driver.
         """
         if not bikes or not persons:
             return {b_idx: [] for b_idx in range(len(bikes))}
             
         bike_riders = {b_idx: [] for b_idx in range(len(bikes))}
-        unassigned = []
         
-        # Pass 1: Direct mount scoring
-        for p in persons:
-            best_b = None
-            best_s = 0.0
-            for b_idx, b in enumerate(bikes):
+        # Pass 1: Assign best primary seated driver to each bike (at most 1 primary driver per bike)
+        scored_pairs = []
+        for b_idx, b in enumerate(bikes):
+            for p_idx, p in enumerate(persons):
                 s = cls.get_rider_bike_association_score(p['bbox'], b['bbox'])
-                if s > best_s:
-                    best_s = s
-                    best_b = b_idx
-            if best_b is not None and best_s > 0.05:
-                bike_riders[best_b].append(p)
-            else:
-                unassigned.append(p)
+                if s >= 0.08:
+                    combined = s * (0.6 + 0.4 * p.get('confidence', 0.5))
+                    scored_pairs.append((combined, b_idx, p_idx, s))
+                    
+        scored_pairs.sort(key=lambda x: x[0], reverse=True)
+        assigned_bikes = set()
+        assigned_persons = set()
+        
+        for combined, b_idx, p_idx, s in scored_pairs:
+            if b_idx not in assigned_bikes and p_idx not in assigned_persons:
+                bike_riders[b_idx].append(persons[p_idx])
+                assigned_bikes.add(b_idx)
+                assigned_persons.add(p_idx)
                 
-        # Pass 2: Tandem rider recovery for partially occluded riders on motorcycles
+        unassigned = [p for idx, p in enumerate(persons) if idx not in assigned_persons]
+        
+        # Pass 2: Tandem rider recovery relative to the mounted primary driver
         for b_idx, mounted in bike_riders.items():
             if not mounted:
                 continue
+            primary = mounted[0]
+            pb_primary = primary['bbox']
+            dph = pb_primary[3] - pb_primary[1]
+            dpw = pb_primary[2] - pb_primary[0]
+            dcx = (pb_primary[0] + pb_primary[2]) / 2.0
+            dy1 = pb_primary[1]
+            dy2 = pb_primary[3]
+            
             b_box = bikes[b_idx]['bbox']
             bh = b_box[3] - b_box[1]
             bw = b_box[2] - b_box[0]
@@ -288,37 +305,47 @@ class HelmetDetector:
             still_unassigned = []
             for p in unassigned:
                 pb = p['bbox']
-                pw = pb[2] - pb[0]
-                ph = pb[3] - pb[1]
+                ppw = pb[2] - pb[0]
+                pph = pb[3] - pb[1]
                 pcx = (pb[0] + pb[2]) / 2.0
+                py1 = pb[1]
+                py2 = pb[3]
                 
-                if not (b_box[0] - 0.10 * bw <= pcx <= b_box[2] + 0.10 * bw):
+                # 1. Horizontal check
+                if not (b_box[0] - 0.15 * bw <= pcx <= b_box[2] + 0.15 * bw):
                     still_unassigned.append(p)
                     continue
                     
-                is_tandem = False
-                for m in mounted:
-                    mb = m['bbox']
-                    mph = mb[3] - mb[1]
-                    mpw = mb[2] - mb[0]
+                # Tandem distance to driver
+                head_x_dist = abs(pcx - dcx)
+                is_horiz_tandem = (head_x_dist <= 1.8 * max(ppw, dpw)) or (pb[0] >= pb_primary[0] - 15 and pb[2] <= pb_primary[2] + 15)
+                if not is_horiz_tandem:
+                    still_unassigned.append(p)
+                    continue
                     
-                    head_y_diff = abs(pb[1] - mb[1])
-                    head_x_dist = abs(pcx - (mb[0] + mb[2]) / 2.0)
-                    scale_ratio = min(ph, mph) / max(ph, mph)
-                    bottom_diff = abs(pb[3] - mb[3]) / max(ph, mph)
+                # 2. Scale ratio (perspective invariant)
+                scale_ratio = min(pph, dph) / max(pph, dph)
+                if scale_ratio < 0.45:
+                    still_unassigned.append(p)
+                    continue
                     
-                    if (head_y_diff <= max(40.0, 0.25 * max(ph, mph)) and 
-                        head_x_dist <= 1.8 * max(pw, mpw) and 
-                        scale_ratio >= 0.55 and 
-                        bottom_diff <= 0.40):
-                        if pb[3] > b_box[1] + 0.20 * bh:
-                            is_tandem = True
-                            break
-                            
-                if is_tandem:
+                # 3. Head alignment
+                head_y_diff = abs(py1 - dy1)
+                is_head_aligned = (head_y_diff <= max(55.0, 0.40 * dph))
+                if not is_head_aligned:
+                    still_unassigned.append(p)
+                    continue
+                    
+                # 4. Bottom / seating plane alignment
+                bottom_diff = abs(py2 - dy2)
+                is_seated_aligned = (bottom_diff <= max(80.0, 0.55 * max(pph, dph)))
+                is_seated_occluded = (py2 >= dy1 + 0.45 * dph and py2 >= b_box[1] + 0.25 * bh and scale_ratio >= 0.55)
+                
+                if is_seated_aligned or is_seated_occluded:
                     mounted.append(p)
                 else:
                     still_unassigned.append(p)
+                    
             unassigned = still_unassigned
             
         return bike_riders
@@ -345,6 +372,7 @@ class HelmetDetector:
         and setting authoritative confirmed vs pending statuses.
         """
         violations = []
+        rider_evaluations = []
         
         bikes = []
         persons = []
@@ -447,21 +475,22 @@ class HelmetDetector:
                         "evidence_image": ev_path,
                         "reason": f"Direct no-helmet detected on {rider_label} (confidence: {nh_conf:.2f})"
                     })
+                    rider_evaluations.append({
+                        'rider_id': rider_label, 'rider_box': p_box, 'head_box': head_box,
+                        'bike_box': associated_bike['bbox'] if associated_bike else None,
+                        'status': 'NO_HELMET', 'confidence': round(float(conf), 4),
+                        'reason': f"Direct no-helmet detected on {rider_label} (confidence: {nh_conf:.2f})"
+                    })
                     continue
 
                 # Case 2: Both Helmet and No-Helmet detected (Conflicting Predictions)
                 if best_nh_idx is not None and best_h_idx is not None:
-                    if h_conf >= nh_conf - 0.10:
-                        # Helmet detection is credible or dominant -> treat as compliant, eliminate false positive
-                        matched_helmets.add(best_h_idx)
+                    # Priority 1: High-confidence head classifier resolves the conflict
+                    if clf_status == 'no_helmet' and clf_conf >= 0.70:
                         matched_no_helmets.add(best_nh_idx)
-                        continue
-                    elif clf_status == 'helmet' and clf_conf >= 0.70:
-                        matched_helmets.add(best_h_idx)
-                        matched_no_helmets.add(best_nh_idx)
-                        continue
-                    elif clf_status == 'no_helmet' and clf_conf >= 0.70:
-                        matched_no_helmets.add(best_nh_idx)
+                        rider_status = 'NO_HELMET'
+                        final_conf = clf_conf
+                        reason = f"Head classifier confirmed no-helmet ({clf_conf:.2f}) resolving conflicting detections (no-helmet: {nh_conf:.2f}, helmet: {h_conf:.2f})"
                         violations.append({
                             "violation_type": "no_helmet",
                             "title": f"NO HELMET VIOLATION — {rider_label}",
@@ -479,14 +508,46 @@ class HelmetDetector:
                             "review_status": "confirmed",
                             "status": "confirmed",
                             "evidence_image": ev_path,
-                            "reason": f"No-helmet confirmed by classifier ({clf_conf:.2f}) resolving conflicting detections (no-helmet: {nh_conf:.2f}, helmet: {h_conf:.2f})"
+                            "reason": reason
+                        })
+                        rider_evaluations.append({
+                            'rider_id': rider_label, 'rider_box': p_box, 'head_box': head_box,
+                            'bike_box': associated_bike['bbox'] if associated_bike else None,
+                            'status': rider_status, 'confidence': round(float(final_conf), 4), 'reason': reason
+                        })
+                        continue
+                    elif clf_status == 'helmet' and clf_conf >= 0.70:
+                        matched_helmets.add(best_h_idx)
+                        matched_no_helmets.add(best_nh_idx)
+                        rider_status = 'HELMET_WORN'
+                        final_conf = clf_conf
+                        reason = f"Head classifier confirmed helmet ({clf_conf:.2f}) resolving conflicting detections"
+                        rider_evaluations.append({
+                            'rider_id': rider_label, 'rider_box': p_box, 'head_box': head_box,
+                            'bike_box': associated_bike['bbox'] if associated_bike else None,
+                            'status': rider_status, 'confidence': round(float(final_conf), 4), 'reason': reason
+                        })
+                        continue
+                    elif h_conf >= nh_conf + 0.08:
+                        matched_helmets.add(best_h_idx)
+                        matched_no_helmets.add(best_nh_idx)
+                        rider_status = 'HELMET_WORN'
+                        final_conf = h_conf
+                        reason = f"Dominant helmet detection ({h_conf:.2f} vs no-helmet {nh_conf:.2f})"
+                        rider_evaluations.append({
+                            'rider_id': rider_label, 'rider_box': p_box, 'head_box': head_box,
+                            'bike_box': associated_bike['bbox'] if associated_bike else None,
+                            'status': rider_status, 'confidence': round(float(final_conf), 4), 'reason': reason
                         })
                         continue
                     else:
                         matched_no_helmets.add(best_nh_idx)
+                        rider_status = 'NO_HELMET'
+                        final_conf = nh_conf
+                        reason = f"No-helmet detection ({nh_conf:.2f}) in conflict (helmet: {h_conf:.2f})"
                         violations.append({
                             "violation_type": "no_helmet",
-                            "title": f"NO HELMET (REVIEW) — {rider_label}",
+                            "title": f"NO HELMET VIOLATION — {rider_label}",
                             "detected": True,
                             "confidence": round(float(nh_conf), 4),
                             "detector_confidence": round(float(nh_conf), 4),
@@ -501,15 +562,21 @@ class HelmetDetector:
                             "review_status": "pending",
                             "status": "pending_review",
                             "evidence_image": ev_path,
-                            "reason": f"Conflicting helmet evidence on {rider_label} (no-helmet: {nh_conf:.2f}, helmet: {h_conf:.2f})"
+                            "reason": reason
+                        })
+                        rider_evaluations.append({
+                            'rider_id': rider_label, 'rider_box': p_box, 'head_box': head_box,
+                            'bike_box': associated_bike['bbox'] if associated_bike else None,
+                            'status': rider_status, 'confidence': round(float(final_conf), 4), 'reason': reason
                         })
                         continue
 
-
                 # Case 3: Helmet directly detected (no competing no-helmet box)
                 if best_h_idx is not None and best_nh_idx is None:
-                    # Check if classifier decisively indicates helmetless (rejecting low confidence false alarm)
-                    if h_conf < 0.30 and clf_status == 'no_helmet' and clf_conf >= 0.85:
+                    if h_conf < 0.55 and clf_status == 'no_helmet' and clf_conf >= 0.80:
+                        rider_status = 'NO_HELMET'
+                        final_conf = clf_conf
+                        reason = f"Head classifier confirmed no-helmet ({clf_conf:.2f}), rejecting weak detection ({h_conf:.2f})"
                         violations.append({
                             "violation_type": "no_helmet",
                             "title": f"NO HELMET VIOLATION — {rider_label}",
@@ -527,12 +594,19 @@ class HelmetDetector:
                             "review_status": "confirmed",
                             "status": "confirmed",
                             "evidence_image": ev_path,
-                            "reason": f"Head classifier confirmed no-helmet ({clf_conf:.2f}) on {rider_label}, rejecting weak detection ({h_conf:.2f})"
+                            "reason": reason
                         })
-                        continue
                     else:
                         matched_helmets.add(best_h_idx)
-                        continue
+                        rider_status = 'HELMET_WORN'
+                        final_conf = h_conf
+                        reason = f"Helmet detected on {rider_label} ({h_conf:.2f})"
+                    rider_evaluations.append({
+                        'rider_id': rider_label, 'rider_box': p_box, 'head_box': head_box,
+                        'bike_box': associated_bike['bbox'] if associated_bike else None,
+                        'status': rider_status, 'confidence': round(float(final_conf), 4), 'reason': reason
+                    })
+                    continue
 
                 # Case 4: Helmet held in hand / lower body (unworn helmet)
                 held_helmet = None
@@ -546,6 +620,8 @@ class HelmetDetector:
 
                 if held_helmet is not None:
                     h_c = float(held_helmet['confidence'])
+                    rider_status = 'NO_HELMET'
+                    reason = f"Helmet detected in rider hand/lower body ({h_c:.2f}) rather than worn on head"
                     violations.append({
                         "violation_type": "no_helmet",
                         "title": f"NO HELMET VIOLATION (HELMET IN HAND) — {rider_label}",
@@ -563,13 +639,21 @@ class HelmetDetector:
                         "review_status": "confirmed",
                         "status": "confirmed",
                         "evidence_image": ev_path,
-                        "reason": f"Helmet detected in rider hand/lower body ({h_c:.2f}) rather than worn on head"
+                        "reason": reason
+                    })
+                    rider_evaluations.append({
+                        'rider_id': rider_label, 'rider_box': p_box, 'head_box': head_box,
+                        'bike_box': associated_bike['bbox'] if associated_bike else None,
+                        'status': rider_status, 'confidence': round(h_c, 4), 'reason': reason
                     })
                     continue
 
                 # Case 5: Neither direct helmet nor direct no-helmet box matched head
                 # Evaluate complementary head classifier:
-                if clf_status == 'no_helmet' and clf_conf >= 0.75:
+                if clf_status == 'no_helmet' and clf_conf >= 0.70:
+                    rider_status = 'NO_HELMET'
+                    final_conf = clf_conf
+                    reason = f"Validated head classifier confirmed no-helmet on {rider_label} (confidence: {clf_conf:.2f})"
                     violations.append({
                         "violation_type": "no_helmet",
                         "title": f"NO HELMET VIOLATION — {rider_label}",
@@ -587,11 +671,23 @@ class HelmetDetector:
                         "review_status": "confirmed",
                         "status": "confirmed",
                         "evidence_image": ev_path,
-                        "reason": f"Validated head classifier confirmed no-helmet on {rider_label} (confidence: {clf_conf:.2f})"
+                        "reason": reason
                     })
-                    continue
-                elif clf_status == 'helmet':
-                    continue
+                elif clf_status == 'helmet' and clf_conf >= 0.70:
+                    rider_status = 'HELMET_WORN'
+                    final_conf = clf_conf
+                    reason = f"Validated head classifier confirmed helmet on {rider_label} (confidence: {clf_conf:.2f})"
+                else:
+                    rider_status = 'UNCERTAIN'
+                    final_conf = clf_conf
+                    reason = f"Head evidence uncertain on {rider_label} (confidence: {clf_conf:.2f})"
+
+                rider_evaluations.append({
+                    'rider_id': rider_label, 'rider_box': p_box, 'head_box': head_box,
+                    'bike_box': associated_bike['bbox'] if associated_bike else None,
+                    'status': rider_status, 'confidence': round(float(final_conf), 4), 'reason': reason
+                })
+                continue
 
         # 3. Standalone direct no-helmet detections not linked to an associated rider box
         for nh_idx, nh in enumerate(no_helmets):
@@ -633,4 +729,5 @@ class HelmetDetector:
                         "reason": f"Direct no-helmet detected on motorcycle (confidence: {nh['confidence']:.2f})"
                     })
 
+        self.last_rider_evaluations = rider_evaluations
         return violations

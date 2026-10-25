@@ -134,6 +134,9 @@ def upload():
                     rider_id=v.get('rider_id'),
                     plate_text=v.get('plate_text'),
                     plate_confidence=v.get('plate_confidence'),
+                    plate_status=v.get('plate_status'),
+                    raw_plate_text=v.get('raw_plate_text'),
+                    plate_crop_path=v.get('plate_crop_path'),
                     evidence_path=v.get('evidence_path'),
                     review_status=v.get('review_status', 'pending'),
                     notes=v.get('reason')
@@ -187,6 +190,9 @@ def upload():
                     rider_id=v.get('rider_id'),
                     plate_text=v.get('plate_text'),
                     plate_confidence=v.get('plate_confidence'),
+                    plate_status=v.get('plate_status'),
+                    raw_plate_text=v.get('raw_plate_text'),
+                    plate_crop_path=v.get('plate_crop_path'),
                     evidence_path=v.get('evidence_path'),
                     review_status=v.get('review_status', 'pending'),
                     notes=v.get('reason')

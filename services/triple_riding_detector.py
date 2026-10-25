@@ -40,77 +40,93 @@ class TripleRidingDetector:
         bh = max(1.0, by2 - by1)
         bcx = (bx1 + bx2) / 2.0
         
-        # 1. Horizontal alignment: rider center must be within motorcycle horizontal span (+ 15% margin)
-        h_margin = bw * 0.15
+        # 1. Horizontal alignment: rider center must be within motorcycle horizontal span (+ 20% margin)
+        h_margin = bw * 0.20
         if not (bx1 - h_margin <= pcx <= bx2 + h_margin):
             return 0.0
             
         inter_x = max(0.0, min(px2, bx2) - max(px1, bx1))
-        if inter_x / pw < 0.25:
+        if inter_x / pw < 0.20:
             return 0.0
 
-        # 2. Foot/Base Proximity:
-        # A mounted rider's feet rest on footpegs/footboards near the lower frame.
-        foot_offset_from_base = (by2 - py2) / bh
-        if foot_offset_from_base > 0.55:
-            return 0.0
-
-        # Rider top must extend above or near top of bike
+        # 2. Vertical Mount & Seating Sanity:
+        # Rider top (head) must extend above or near top of bike
         if py1 > by1 + 0.45 * bh:
             return 0.0
 
-        # Rider bottom cannot extend far below bike base
-        if py2 > by2 + 0.20 * bh:
+        # Rider body must overlap or enter the motorcycle vertically
+        # Rider bottom must reach at or into the bike top
+        if py2 < by1 - 0.05 * bh:
             return 0.0
 
-        # 3. Relative Scale Sanity
-        if ph < 0.35 * bh or ph > 2.5 * bh:
+        # Rider bottom cannot extend far below bike base (pedestrian standing far below bike)
+        if py2 > by2 + 0.25 * bh:
+            return 0.0
+
+        # 3. Relative Scale Sanity (Perspective depth check)
+        if ph < 0.35 * bh or ph > 3.0 * bh:
             return 0.0
 
         inter_y = max(0.0, min(py2, by2) - max(py1, by1))
+        if inter_y <= 0:
+            return 0.0
+            
         overlap = (inter_x * inter_y) / (pw * ph)
-        
+        vert_penetration = inter_y / max(1.0, min(ph, bh))
         h_dist = abs(pcx - bcx) / bw
-        foot_dist = max(0.0, foot_offset_from_base)
         
-        score = overlap * (1.0 - 0.35 * min(1.0, h_dist)) * (1.0 - 0.40 * min(1.0, foot_dist))
-        return max(0.01, score)
+        score = (0.5 * overlap + 0.5 * min(1.0, vert_penetration)) * (1.0 - 0.25 * min(1.0, h_dist))
+        return score
 
     @classmethod
     def is_rider_on_bike(cls, person_box, bike_box):
-        return cls.get_rider_bike_association_score(person_box, bike_box) > 0.0
+        return cls.get_rider_bike_association_score(person_box, bike_box) >= 0.08
 
     @classmethod
     def associate_riders_to_motorcycles(cls, bikes, persons):
         """
         Associates persons with motorcycles using 2-pass physical geometry:
-        Pass 1: Direct seated mount assignment (exclusive).
-        Pass 2: Tandem recovery for partially occluded tandem riders.
+        Pass 1: Direct seated mount assignment (at most 1 primary driver per bike).
+        Pass 2: Tandem recovery for genuine tandem riders relative to the mounted driver.
         """
         if not bikes or not persons:
             return {b_idx: [] for b_idx in range(len(bikes))}
             
         bike_riders = {b_idx: [] for b_idx in range(len(bikes))}
-        unassigned = []
         
-        # Pass 1: Direct mount scoring
-        for p in persons:
-            best_b = None
-            best_s = 0.0
-            for b_idx, b in enumerate(bikes):
+        # Pass 1: Assign best primary seated driver to each bike (at most 1 primary driver per bike)
+        scored_pairs = []
+        for b_idx, b in enumerate(bikes):
+            for p_idx, p in enumerate(persons):
                 s = cls.get_rider_bike_association_score(p['bbox'], b['bbox'])
-                if s > best_s:
-                    best_s = s
-                    best_b = b_idx
-            if best_b is not None and best_s > 0.05:
-                bike_riders[best_b].append(p)
-            else:
-                unassigned.append(p)
+                if s >= 0.08:
+                    combined = s * (0.6 + 0.4 * p.get('confidence', 0.5))
+                    scored_pairs.append((combined, b_idx, p_idx, s))
+                    
+        scored_pairs.sort(key=lambda x: x[0], reverse=True)
+        assigned_bikes = set()
+        assigned_persons = set()
+        
+        for combined, b_idx, p_idx, s in scored_pairs:
+            if b_idx not in assigned_bikes and p_idx not in assigned_persons:
+                bike_riders[b_idx].append(persons[p_idx])
+                assigned_bikes.add(b_idx)
+                assigned_persons.add(p_idx)
                 
-        # Pass 2: Tandem rider recovery for partially occluded riders on motorcycles
+        unassigned = [p for idx, p in enumerate(persons) if idx not in assigned_persons]
+        
+        # Pass 2: Tandem rider recovery relative to the mounted primary driver
         for b_idx, mounted in bike_riders.items():
             if not mounted:
                 continue
+            primary = mounted[0]
+            pb_primary = primary['bbox']
+            dph = pb_primary[3] - pb_primary[1]
+            dpw = pb_primary[2] - pb_primary[0]
+            dcx = (pb_primary[0] + pb_primary[2]) / 2.0
+            dy1 = pb_primary[1]
+            dy2 = pb_primary[3]
+            
             b_box = bikes[b_idx]['bbox']
             bh = b_box[3] - b_box[1]
             bw = b_box[2] - b_box[0]
@@ -118,37 +134,47 @@ class TripleRidingDetector:
             still_unassigned = []
             for p in unassigned:
                 pb = p['bbox']
-                pw = pb[2] - pb[0]
-                ph = pb[3] - pb[1]
+                ppw = pb[2] - pb[0]
+                pph = pb[3] - pb[1]
                 pcx = (pb[0] + pb[2]) / 2.0
+                py1 = pb[1]
+                py2 = pb[3]
                 
-                if not (b_box[0] - 0.10 * bw <= pcx <= b_box[2] + 0.10 * bw):
+                # 1. Horizontal check
+                if not (b_box[0] - 0.15 * bw <= pcx <= b_box[2] + 0.15 * bw):
                     still_unassigned.append(p)
                     continue
                     
-                is_tandem = False
-                for m in mounted:
-                    mb = m['bbox']
-                    mph = mb[3] - mb[1]
-                    mpw = mb[2] - mb[0]
+                # Tandem distance to driver
+                head_x_dist = abs(pcx - dcx)
+                is_horiz_tandem = (head_x_dist <= 1.8 * max(ppw, dpw)) or (pb[0] >= pb_primary[0] - 15 and pb[2] <= pb_primary[2] + 15)
+                if not is_horiz_tandem:
+                    still_unassigned.append(p)
+                    continue
                     
-                    head_y_diff = abs(pb[1] - mb[1])
-                    head_x_dist = abs(pcx - (mb[0] + mb[2]) / 2.0)
-                    scale_ratio = min(ph, mph) / max(ph, mph)
-                    bottom_diff = abs(pb[3] - mb[3]) / max(ph, mph)
+                # 2. Scale ratio (perspective invariant)
+                scale_ratio = min(pph, dph) / max(pph, dph)
+                if scale_ratio < 0.45:
+                    still_unassigned.append(p)
+                    continue
                     
-                    if (head_y_diff <= max(40.0, 0.25 * max(ph, mph)) and 
-                        head_x_dist <= 1.8 * max(pw, mpw) and 
-                        scale_ratio >= 0.55 and 
-                        bottom_diff <= 0.40):
-                        if pb[3] > b_box[1] + 0.20 * bh:
-                            is_tandem = True
-                            break
-                            
-                if is_tandem:
+                # 3. Head alignment
+                head_y_diff = abs(py1 - dy1)
+                is_head_aligned = (head_y_diff <= max(55.0, 0.40 * dph))
+                if not is_head_aligned:
+                    still_unassigned.append(p)
+                    continue
+                    
+                # 4. Bottom / seating plane alignment
+                bottom_diff = abs(py2 - dy2)
+                is_seated_aligned = (bottom_diff <= max(80.0, 0.55 * max(pph, dph)))
+                is_seated_occluded = (py2 >= dy1 + 0.45 * dph and py2 >= b_box[1] + 0.25 * bh and scale_ratio >= 0.55)
+                
+                if is_seated_aligned or is_seated_occluded:
                     mounted.append(p)
                 else:
                     still_unassigned.append(p)
+                    
             unassigned = still_unassigned
             
         return bike_riders

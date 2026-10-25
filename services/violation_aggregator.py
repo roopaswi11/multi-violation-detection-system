@@ -103,6 +103,15 @@ class ViolationAggregator:
         if wrong_side_violations:
             raw_list.extend(wrong_side_violations)
 
+        # Collect distinct vehicle target boxes across all violations in this frame
+        all_vehicle_boxes = []
+        for rv in raw_list:
+            v_box = rv.get('bike_box') or rv.get('bounding_box')
+            if v_box and len(v_box) >= 4:
+                if not any(self._compute_iou(v_box, existing) > 0.60 for existing in all_vehicle_boxes):
+                    all_vehicle_boxes.append(v_box)
+        is_multi_vehicle = len(all_vehicle_boxes) > 1
+
         for v in raw_list:
             v_type = v['violation_type']
             track_id = v.get('track_id')
@@ -114,34 +123,77 @@ class ViolationAggregator:
             is_candidate = v.get('is_candidate', False) or (v.get('review_status') == 'insufficient_evidence')
             detected = v.get('detected', not is_candidate)
 
-            # Associate plate OCR info: match to bike box if possible
-            plate_info = {'text': None, 'confidence': None, 'status': 'none_detected'}
+            # Associate plate OCR info: match to vehicle box (bike_box or bbox)
+            plate_info = {'text': 'UNREADABLE', 'confidence': None, 'status': 'none_detected', 'raw_text': None, 'crop_path': None}
             if plate_ocr_results:
                 best_plate = None
-                best_iou = 0.0
+                best_score = -1.0
+                target_box = bike_box or bbox
+
                 for p_res in plate_ocr_results:
+                    # A. Match by track_id if both are tracked
+                    p_tid = p_res.get('track_id')
+                    if track_id is not None and p_tid is not None and track_id == p_tid:
+                        best_plate = p_res
+                        break
+
+                    # B. Match by tagged vehicle_bbox
+                    vbox = p_res.get('vehicle_bbox')
+                    if vbox and target_box and len(target_box) >= 4:
+                        iou = self._compute_iou(vbox, target_box)
+                        if iou > 0.40:
+                            match_score = 10.0 + iou * 2.0 + float(p_res.get('confidence') or 0.0)
+                            if p_res.get('status') == 'readable':
+                                match_score += 5.0
+                            if match_score > best_score:
+                                best_score = match_score
+                                best_plate = p_res
+                                continue
+
+                    # C. Spatial containment / proximity match
                     pbox = p_res.get('bbox')
-                    if pbox and bike_box:
-                        iou = self._compute_iou(pbox, bike_box)
-                        if iou > best_iou:
-                            best_iou = iou
-                            best_plate = p_res
-                
-                # If no bike match, take first readable plate
-                if not best_plate:
+                    if pbox and target_box and len(target_box) >= 4:
+                        pcx = (pbox[0] + pbox[2]) / 2.0
+                        pcy = (pbox[1] + pbox[3]) / 2.0
+                        in_x = (target_box[0] - 25 <= pcx <= target_box[2] + 25)
+                        in_y = (target_box[1] - 20 <= pcy <= target_box[3] + 35)
+                        if in_x and in_y:
+                            # Verify target_box is the closest vehicle to this plate center
+                            dist_to_target = (pcx - (target_box[0] + target_box[2]) / 2.0) ** 2 + (pcy - (target_box[1] + target_box[3]) / 2.0) ** 2
+                            is_closest = True
+                            for other_vbox in all_vehicle_boxes:
+                                if other_vbox is not target_box and self._compute_iou(other_vbox, target_box) < 0.40:
+                                    dist_to_other = (pcx - (other_vbox[0] + other_vbox[2]) / 2.0) ** 2 + (pcy - (other_vbox[1] + other_vbox[3]) / 2.0) ** 2
+                                    if dist_to_other < dist_to_target:
+                                        is_closest = False
+                                        break
+                            if is_closest:
+                                match_score = 2.0 + float(p_res.get('confidence') or 0.0)
+                                if p_res.get('status') == 'readable':
+                                    match_score += 2.0
+                                elif p_res.get('status') == 'partial':
+                                    match_score += 0.5
+                                if match_score > best_score:
+                                    best_score = match_score
+                                    best_plate = p_res
+
+                # D. Fallback only if there is strictly ONE vehicle in the scene
+                # In multi-vehicle scenes, NEVER assign a plate from one vehicle to another!
+                if not best_plate and not is_multi_vehicle:
                     for p_res in plate_ocr_results:
-                        if p_res.get('status') == 'readable':
+                        if p_res.get('status') in ['readable', 'partial'] and p_res.get('normalized_text') not in ['', 'UNREADABLE']:
                             best_plate = p_res
                             break
-                            
-                if not best_plate and plate_ocr_results:
-                    best_plate = plate_ocr_results[0]
 
                 if best_plate:
+                    norm_text = best_plate.get('normalized_text')
+                    p_status = best_plate.get('status', 'readable' if norm_text and norm_text != 'UNREADABLE' else 'unreadable')
                     plate_info = {
-                        'text': best_plate.get('normalized_text'),
+                        'text': norm_text if p_status != 'unreadable' else 'UNREADABLE',
                         'confidence': best_plate.get('confidence'),
-                        'status': best_plate.get('status', 'readable' if best_plate.get('normalized_text') else 'unreadable')
+                        'status': p_status,
+                        'raw_text': best_plate.get('raw_text'),
+                        'crop_path': best_plate.get('crop_path')
                     }
 
             # Standardized title & review status
@@ -175,6 +227,8 @@ class ViolationAggregator:
                 "plate_text": plate_info['text'],
                 "plate_confidence": plate_info['confidence'],
                 "plate_status": plate_info['status'],
+                "raw_plate_text": plate_info.get('raw_text'),
+                "plate_crop_path": plate_info.get('crop_path'),
                 "review_status": rev_status,
                 "status": status_code,
                 "reason": v.get('reason', ''),
