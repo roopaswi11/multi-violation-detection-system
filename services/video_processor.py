@@ -1,5 +1,6 @@
 import os
 import cv2
+import numpy as np
 import time
 import uuid
 from config import Config
