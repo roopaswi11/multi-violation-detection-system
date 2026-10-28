@@ -220,12 +220,44 @@ class HelmetDetector:
 
     def classify_head(self, head_crop):
         """
-        Evaluates a head crop using the trained complementary head classifier (MobileNetV3).
+        Evaluates a head crop using either Vision Transformer (ViT) or complementary head classifier (MobileNet/ResNet).
         Returns:
             status: 'helmet', 'no_helmet', or 'uncertain'
             confidence: float in [0.0, 1.0]
         """
-        if self.head_classifier is None or head_crop is None or head_crop.size == 0:
+        if head_crop is None or head_crop.size == 0:
+            return 'uncertain', 0.50
+
+        # Option A: Vision Transformer (ViT) inference if enabled
+        if self.vit_enabled and self.vit_classifier is not None:
+            try:
+                rgb = cv2.cvtColor(head_crop, cv2.COLOR_BGR2RGB)
+                pil_img = Image.fromarray(rgb)
+                inputs = self.image_processor(images=pil_img, return_tensors="pt")
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                with torch.no_grad():
+                    outputs = self.vit_classifier(**inputs)
+                    probs = torch.softmax(outputs.logits, dim=-1)[0]
+                    id2label = getattr(self.vit_classifier.config, 'id2label', {0: 'helmet', 1: 'no_helmet'})
+                    h_prob, nh_prob = 0.5, 0.5
+                    for idx, label in id2label.items():
+                        norm_label = str(label).lower().replace('-', '_').replace(' ', '_')
+                        if 'no' in norm_label or 'without' in norm_label:
+                            nh_prob = float(probs[int(idx)].item())
+                        elif 'helmet' in norm_label:
+                            h_prob = float(probs[int(idx)].item())
+
+                if nh_prob >= 0.70:
+                    return 'no_helmet', nh_prob
+                elif h_prob >= 0.70:
+                    return 'helmet', h_prob
+                else:
+                    return 'uncertain', max(h_prob, nh_prob)
+            except Exception as e:
+                print(f"[HelmetDetector] ViT inference error ({e}), falling back to standard classifier...")
+
+        # Option B: Standard Complementary Head Classifier
+        if self.head_classifier is None:
             return 'uncertain', 0.50
 
         try:

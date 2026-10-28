@@ -1,0 +1,231 @@
+import json
+
+notebook = {
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Vision Transformer (ViT) Helmet Classifier Training on GPU\n",
+    "\n",
+    "This notebook fine-tunes **google/vit-base-patch16-224** for binary helmet compliance verification (`helmet` vs `no_helmet`) using **Google Colab Pro GPU** (T4 / V100 / A100).\n",
+    "\n",
+    "### Steps to Run:\n",
+    "1. **Ensure GPU is Active**: Click **Runtime** -> **Change runtime type** -> Select **T4 GPU** or **A100 GPU** -> Save.\n",
+    "2. **Upload `vit_dataset.zip`**: Upload the `vit_dataset.zip` file generated from your local machine to the Colab files pane on the left.\n",
+    "3. **Run All Cells**: Click **Runtime** -> **Run all** (takes ~5–7 minutes).\n",
+    "4. **Download**: The final cell will automatically download `vit_helmet_model.zip` for use in your project."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Step 1: Check GPU & CUDA Acceleration\n",
+    "!nvidia-smi\n",
+    "import torch\n",
+    "print('CUDA Available:', torch.cuda.is_available())\n",
+    "if torch.cuda.is_available():\n",
+    "    print('Device:', torch.cuda.get_device_name(0))\n",
+    "else:\n",
+    "    print('WARNING: No GPU detected! Go to Runtime -> Change runtime type -> Select GPU')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Step 2: Install required Hugging Face libraries\n",
+    "!pip install -q transformers datasets evaluate accelerate torchvision\n",
+    "print('Libraries installed successfully!')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Step 3: Unzip the uploaded vit_dataset.zip\n",
+    "import os, zipfile\n",
+    "\n",
+    "if not os.path.exists('vit_dataset.zip'):\n",
+    "    print('Please upload vit_dataset.zip to the Colab file pane on the left!')\n",
+    "else:\n",
+    "    with zipfile.ZipFile('vit_dataset.zip', 'r') as z:\n",
+    "        z.extractall('.')\n",
+    "    print('Dataset extracted successfully!')\n",
+    "    for split in ['train', 'val']:\n",
+    "        p = os.path.join('data', 'vit_dataset', split)\n",
+    "        if os.path.exists(p):\n",
+    "            counts = {c: len(os.listdir(os.path.join(p, c))) for c in os.listdir(p)}\n",
+    "            print(f'{split.upper()} split count: {counts}')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Step 4: Setup Dataset Loaders and Transforms\n",
+    "import torchvision.transforms as transforms\n",
+    "from torchvision.datasets import ImageFolder\n",
+    "from transformers import AutoImageProcessor, AutoModelForImageClassification, TrainingArguments, Trainer\n",
+    "import evaluate\n",
+    "import numpy as np\n",
+    "\n",
+    "MODEL_ID = 'google/vit-base-patch16-224'\n",
+    "image_processor = AutoImageProcessor.from_pretrained(MODEL_ID)\n",
+    "\n",
+    "train_transform = transforms.Compose([\n",
+    "    transforms.Resize((224, 224)),\n",
+    "    transforms.RandomHorizontalFlip(p=0.5),\n",
+    "    transforms.RandomRotation(degrees=10),\n",
+    "    transforms.ColorJitter(brightness=0.2, contrast=0.2),\n",
+    "    transforms.ToTensor(),\n",
+    "    transforms.Normalize(mean=image_processor.image_mean, std=image_processor.image_std)\n",
+    "])\n",
+    "\n",
+    "val_transform = transforms.Compose([\n",
+    "    transforms.Resize((224, 224)),\n",
+    "    transforms.ToTensor(),\n",
+    "    transforms.Normalize(mean=image_processor.image_mean, std=image_processor.image_std)\n",
+    "])\n",
+    "\n",
+    "train_dataset = ImageFolder('data/vit_dataset/train', transform=train_transform)\n",
+    "val_dataset = ImageFolder('data/vit_dataset/val', transform=val_transform)\n",
+    "\n",
+    "id2label = {i: c for i, c in enumerate(train_dataset.classes)}\n",
+    "label2id = {c: i for i, c in enumerate(train_dataset.classes)}\n",
+    "print('Classes:', id2label)\n",
+    "print('Total Training Samples:', len(train_dataset))\n",
+    "print('Total Validation Samples:', len(val_dataset))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Step 5: Initialize ViT Model with Binary Helmet Head\n",
+    "model = AutoModelForImageClassification.from_pretrained(\n",
+    "    MODEL_ID,\n",
+    "    num_labels=2,\n",
+    "    id2label=id2label,\n",
+    "    label2id=label2id,\n",
+    "    ignore_mismatched_sizes=True\n",
+    ")\n",
+    "\n",
+    "accuracy_metric = evaluate.load('accuracy')\n",
+    "f1_metric = evaluate.load('f1')\n",
+    "\n",
+    "def compute_metrics(eval_pred):\n",
+    "    logits, labels = eval_pred\n",
+    "    predictions = np.argmax(logits, axis=-1)\n",
+    "    acc = accuracy_metric.compute(predictions=predictions, references=labels)['accuracy']\n",
+    "    f1 = f1_metric.compute(predictions=predictions, references=labels, average='weighted')['f1']\n",
+    "    return {'accuracy': acc, 'f1': f1}\n",
+    "\n",
+    "print('ViT model initialized with 2-class head.')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Step 6: Configure GPU Training Arguments and Launch Training\n",
+    "import torch\n",
+    "\n",
+    "def collate_fn(batch):\n",
+    "    pixel_values = torch.stack([item[0] for item in batch])\n",
+    "    labels = torch.tensor([item[1] for item in batch], dtype=torch.long)\n",
+    "    return {'pixel_values': pixel_values, 'labels': labels}\n",
+    "\n",
+    "training_args = TrainingArguments(\n",
+    "    output_dir='./vit_checkpoints',\n",
+    "    logging_dir='./logs',\n",
+    "    eval_strategy='epoch',\n",
+    "    save_strategy='epoch',\n",
+    "    learning_rate=5e-5,\n",
+    "    per_device_train_batch_size=32,\n",
+    "    per_device_eval_batch_size=32,\n",
+    "    num_train_epochs=5,\n",
+    "    weight_decay=0.01,\n",
+    "    warmup_ratio=0.1,\n",
+    "    fp16=torch.cuda.is_available(),\n",
+    "    load_best_model_at_end=True,\n",
+    "    metric_for_best_model='accuracy',\n",
+    "    logging_steps=10,\n",
+    "    save_total_limit=1\n",
+    ")\n",
+    "\n",
+    "trainer = Trainer(\n",
+    "    model=model,\n",
+    "    args=training_args,\n",
+    "    train_dataset=train_dataset,\n",
+    "    eval_dataset=val_dataset,\n",
+    "    data_collator=collate_fn,\n",
+    "    compute_metrics=compute_metrics\n",
+    ")\n",
+    "\n",
+    "print('Starting ViT fine-tuning on GPU...')\n",
+    "trainer.train()\n",
+    "print('Training complete!')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Step 7: Evaluate on Validation Set\n",
+    "eval_results = trainer.evaluate()\n",
+    "print('\\n--- Final Validation Metrics ---')\n",
+    "for k, v in eval_results.items():\n",
+    "    print(f'{k}: {v:.4f}' if isinstance(v, float) else f'{k}: {v}')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": None,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Step 8: Save Model, Zip, and Download for Local Deployment\n",
+    "import shutil\n",
+    "from google.colab import files\n",
+    "\n",
+    "SAVE_DIR = './vit_helmet_model'\n",
+    "trainer.save_model(SAVE_DIR)\n",
+    "image_processor.save_pretrained(SAVE_DIR)\n",
+    "\n",
+    "# Zip model folder\n",
+    "shutil.make_archive('vit_helmet_model', 'zip', SAVE_DIR)\n",
+    "print('Saved model zipped to vit_helmet_model.zip!')\n",
+    "print('Triggering download to your computer...')\n",
+    "files.download('vit_helmet_model.zip')"
+   ]
+  }
+ ],
+ "metadata": {
+  "accelerator": "GPU",
+  "language_info": {
+   "name": "python"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}
+
+with open("train_vit_colab.ipynb", "w", encoding="utf-8") as f:
+    json.dump(notebook, f, indent=1)
+print("Successfully generated train_vit_colab.ipynb!")

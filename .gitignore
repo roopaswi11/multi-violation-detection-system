@@ -1,9 +1,49 @@
+# Datasets
 IMVTDataset/
+data/vit_dataset/
+vit_dataset.zip
+
+# Python cache and virtual environments
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
 .pytest_cache/
+.venv/
+venv/
+
+# Logs and temporary files
 *.log
 scratch/
 services/*.bak
+
+# Local database
+database/traffic.db
+
+# Uploaded test files
+uploads/*
+
+# Generated detection outputs
+outputs/images/*
+outputs/videos/*
+outputs/evidence/*
+
+# Generated report assets
+report_assets/
+
+# Keep output folders available in the project
+!outputs/images/.gitkeep
+!outputs/videos/.gitkeep
+!outputs/evidence/.gitkeep
+# ViT dataset and trained model
+data/vit_dataset/
+vit_dataset.zip
+models/vit_helmet_model/
+
+# Generated files
+outputs/images/*
+outputs/videos/*
+outputs/evidence/*
+uploads/*
+report_assets/
+
+# Local database
+database/traffic.db

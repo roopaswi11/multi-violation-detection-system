@@ -40,12 +40,10 @@ class Config:
     
     # Class IDs for standard COCO vs custom model
     # COCO: 0=person, 3=motorcycle
-    COCO_MOTORCYCLE_CLASS = 3
-    COCO_PERSON_CLASS = 0
-    
+    COCO_MOTORCYCLE_CLASS = 3    
     # ViT Settings
-    ENABLE_VIT_CLASSIFIER = False
-    VIT_MODEL_NAME = "google/vit-base-patch16-224"
+    ENABLE_VIT_CLASSIFIER = True
+    VIT_MODEL_NAME = os.path.join(BASE_DIR, "models", "vit_helmet_model")
     VIT_HEAD_CROP_RATIO = 0.30  # Top 30% of rider bbox for head/helmet check
     
     # Triple Riding Settings

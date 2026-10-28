@@ -14,7 +14,7 @@ from services.violation_aggregator import ViolationAggregator
 
 class VideoProcessor:
     def __init__(self, detector=None, permitted_direction=None, road_roi=None,
-                 enable_vit=False, conf_threshold=None):
+                 enable_vit=None, conf_threshold=None):
         self.detector = detector or DetectionService(conf_threshold=conf_threshold)
         self.permitted_direction = permitted_direction or Config.DEFAULT_PERMITTED_DIRECTION
         self.tracker = TrackingService()
@@ -242,6 +242,8 @@ class VideoProcessor:
 
         frame_idx = 0
         all_violations = []
+        tracked_plates = {}          # Cache: {track_id: plate_result}
+        tracked_helmet_cache = {}    # Cache: {track_id: {'frame': int, 'viols': list}}
 
         try:
             while cap.isOpened():
@@ -280,8 +282,13 @@ class VideoProcessor:
                 for bike in bike_dets:
                     tid = bike.get('track_id')
                     
-                    # Helmet check
-                    h_viols = self.helmet_detector.analyze(frame, tracked_detections, track_id=tid, frame_idx=frame_idx)
+                    # Helmet check with temporal caching (re-evaluates every 12 frames per track to avoid redundant deep inference)
+                    if tid is not None and tid in tracked_helmet_cache and (frame_idx - tracked_helmet_cache[tid]['frame']) < 12:
+                        h_viols = tracked_helmet_cache[tid]['viols']
+                    else:
+                        h_viols = self.helmet_detector.analyze(frame, tracked_detections, track_id=tid, frame_idx=frame_idx)
+                        if tid is not None:
+                            tracked_helmet_cache[tid] = {'frame': frame_idx, 'viols': h_viols}
                     frame_helmet_violations.extend(h_viols)
 
                     # Triple riding check
@@ -296,28 +303,38 @@ class VideoProcessor:
                         if ws_viol:
                             frame_wrong_side_violations.append(ws_viol)
 
-                # 5. Extract plates occasionally (every 5 frames to conserve CPU)
+                # 5. Extract plates efficiently (uses track cache; only runs OCR for violating tracks or new direct plate detections)
                 plate_results = []
-                if frame_idx % 5 == 1:
-                    direct_plates = [d for d in tracked_detections if 'plate' in d['class_name'].lower()]
-                    for bike in bike_dets:
+                direct_plates = [d for d in tracked_detections if 'plate' in d['class_name'].lower()]
+                violating_tids = {v.get('track_id') for v in (frame_helmet_violations + frame_triple_violations + frame_wrong_side_violations) if v.get('track_id') is not None}
+                
+                # Check bikes
+                for bike in bike_dets:
+                    tid = bike.get('track_id')
+                    if tid is not None and tid in tracked_plates:
+                        plate_results.append(tracked_plates[tid])
+                    elif tid in violating_tids or (direct_plates and frame_idx % 8 == 1):
                         p_res = self.plate_ocr.extract_plate_from_vehicle(frame, bike['bbox'], direct_plates=direct_plates, vehicle_type='motorcycle')
                         if p_res:
                             p_res['vehicle_bbox'] = bike['bbox']
-                            p_res['track_id'] = bike.get('track_id')
-                            if p_res.get('normalized_text') != 'UNREADABLE':
-                                plate_results.append(p_res)
-                            elif p_res.get('bbox'):
-                                plate_results.append(p_res)
-                    for veh in other_veh_dets:
+                            p_res['track_id'] = tid
+                            plate_results.append(p_res)
+                            if tid is not None and p_res.get('normalized_text') not in ['', 'UNREADABLE']:
+                                tracked_plates[tid] = p_res
+
+                # Check other vehicles (only if violating or new direct plate)
+                for veh in other_veh_dets:
+                    tid = veh.get('track_id')
+                    if tid is not None and tid in tracked_plates:
+                        plate_results.append(tracked_plates[tid])
+                    elif tid in violating_tids:
                         p_res = self.plate_ocr.extract_plate_from_vehicle(frame, veh['bbox'], direct_plates=direct_plates, vehicle_type='car')
                         if p_res:
                             p_res['vehicle_bbox'] = veh['bbox']
-                            p_res['track_id'] = veh.get('track_id')
-                            if p_res.get('normalized_text') != 'UNREADABLE':
-                                plate_results.append(p_res)
-                            elif p_res.get('bbox'):
-                                plate_results.append(p_res)
+                            p_res['track_id'] = tid
+                            plate_results.append(p_res)
+                            if tid is not None and p_res.get('normalized_text') not in ['', 'UNREADABLE']:
+                                tracked_plates[tid] = p_res
 
                 # 6. Aggregate & deduplicate frame violations
                 frame_v = self.aggregator.aggregate_frame(
